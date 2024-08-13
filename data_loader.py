@@ -3,6 +3,7 @@ import json
 from PIL import Image
 import torch
 from torch.utils.data import Dataset
+from torchvision import transforms
 
 class DataLoaderBase:
     def __init__(self, data, image_folder, audio_folder=None):
@@ -34,10 +35,14 @@ class DataLoaderBase:
         return None
 
 class ImageTextDataset(DataLoaderBase, Dataset):
-    def __init__(self, data, image_folder, processor):
+    def __init__(self, data, image_folder, processor, image_size=(224, 224)):
         """Initialize the dataset with preloaded JSON data and the image folder."""
         super().__init__(data=data, image_folder=image_folder)
         self.processor = processor
+        self.image_transform = transforms.Compose([
+            transforms.Resize(image_size),  # Resize all images to the same size
+            transforms.ToTensor(),  # Convert PIL image to Tensor
+        ])
 
     def __len__(self):
         """Return the total number of samples."""
@@ -50,6 +55,9 @@ class ImageTextDataset(DataLoaderBase, Dataset):
         
         if image is None:
             raise ValueError(f"Failed to load image with ID {entry['id']}.")
+        
+        # Apply the transform to resize the image
+        image = self.image_transform(image)
         
         text = entry['text']
         label = entry['label']  # Access the label from the entry
