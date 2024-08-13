@@ -3,7 +3,6 @@ import json
 from PIL import Image
 import torch
 from torch.utils.data import Dataset
-from transformers import Blip2Processor
 
 class DataLoaderBase:
     def __init__(self, data_path, image_folder, audio_folder=None):
@@ -43,7 +42,7 @@ class DataLoaderBase:
 class ImageTextDataset(DataLoaderBase, Dataset):
     def __init__(self, json_data, image_folder, processor):
         """Initialize the dataset with JSON data and the image folder."""
-        super().__init__(json_data, image_folder)
+        super().__init__(data_path=json_data, image_folder=image_folder)
         self.processor = processor
 
     def __len__(self):
