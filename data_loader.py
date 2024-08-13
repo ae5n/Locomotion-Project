@@ -5,16 +5,10 @@ import torch
 from torch.utils.data import Dataset
 
 class DataLoaderBase:
-    def __init__(self, data_path, image_folder, audio_folder=None):
-        self.data_path = data_path
+    def __init__(self, data, image_folder, audio_folder=None):
+        self.data = data
         self.image_folder = image_folder
         self.audio_folder = audio_folder
-        self.data = self.load_json()
-
-    def load_json(self):
-        """Load the JSON file containing the dataset annotations."""
-        with open(self.data_path, 'r') as f:
-            return json.load(f)
 
     def get_image_path(self, image_id):
         """Get the path to the image file, assuming all images are in .jpg format."""
@@ -40,9 +34,9 @@ class DataLoaderBase:
         return None
 
 class ImageTextDataset(DataLoaderBase, Dataset):
-    def __init__(self, json_data, image_folder, processor):
-        """Initialize the dataset with JSON data and the image folder."""
-        super().__init__(data_path=json_data, image_folder=image_folder)
+    def __init__(self, data, image_folder, processor):
+        """Initialize the dataset with preloaded JSON data and the image folder."""
+        super().__init__(data=data, image_folder=image_folder)
         self.processor = processor
 
     def __len__(self):
@@ -58,8 +52,9 @@ class ImageTextDataset(DataLoaderBase, Dataset):
             raise ValueError(f"Failed to load image with ID {entry['id']}.")
         
         text = entry['text']
+        label = entry['label']  # Access the label from the entry
         
         inputs = self.processor(images=image, text=text, return_tensors="pt")
         inputs = {k: v.squeeze(0) for k, v in inputs.items()}
         
-        return inputs, entry['label']
+        return inputs, label  # Return both the inputs and the label
