@@ -3,6 +3,7 @@ import json
 from PIL import Image
 import torch
 from torch.utils.data import Dataset
+from transformers import Blip2Processor
 
 class DataLoaderBase:
     def __init__(self, data_path, image_folder, audio_folder=None):
@@ -36,14 +37,13 @@ class DataLoaderBase:
         """Load the audio file if needed (functionality to be implemented)."""
         audio_path = self.get_audio_path(audio_id)
         if audio_path:
-            pass 
+            pass  # Implement audio loading logic if needed
         return None
 
-class ImageTextDataset(Dataset):
+class ImageTextDataset(DataLoaderBase, Dataset):
     def __init__(self, json_data, image_folder, processor):
         """Initialize the dataset with JSON data and the image folder."""
-        self.data = json_data
-        self.image_folder = image_folder
+        super().__init__(json_data, image_folder)
         self.processor = processor
 
     def __len__(self):
