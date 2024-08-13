@@ -6,7 +6,7 @@ from sklearn.metrics import accuracy_score, classification_report
 from torch.optim.lr_scheduler import ReduceLROnPlateau
 import json
 from data_loader import CLIPLocomotionDataset, clip_collate_fn
-from model import CustomCLIPModel
+from models import CustomCLIPModel
 
 def train_model(args):
     # Load the JSON files
