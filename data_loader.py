@@ -1,68 +1,88 @@
 import os
 import json
-from PIL import Image
 import torch
+from PIL import Image
 from torch.utils.data import Dataset
-from torchvision import transforms
+from transformers import CLIPProcessor
 
-class DataLoaderBase:
-    def __init__(self, data, image_folder, audio_folder=None):
+class BaseLocomotionDataset(Dataset):
+    def __init__(self, data, image_folder):
+        """
+        Base dataset class for locomotion tasks.
+        """
         self.data = data
         self.image_folder = image_folder
-        self.audio_folder = audio_folder
-
-    def get_image_path(self, image_id):
-        """Get the path to the image file, assuming all images are in .jpg format."""
-        return os.path.join(self.image_folder, f"{image_id}.jpg")
-
-    def load_image(self, image_id):
-        """Load the image given its ID."""
-        image_path = self.get_image_path(image_id)
-        try:
-            return Image.open(image_path).convert("RGB")
-        except FileNotFoundError:
-            print(f"Image {image_path} not found.")
-            return None
-        except Exception as e:
-            print(f"Error loading image {image_path}: {e}")
-            return None
-
-    def load_audio(self, audio_id):
-        """Load the audio file if needed (functionality to be implemented)."""
-        audio_path = self.get_audio_path(audio_id)
-        if audio_path:
-            pass  # Implement audio loading logic if needed
-        return None
-
-class ImageTextDataset(DataLoaderBase, Dataset):
-    def __init__(self, data, image_folder, processor, image_size=(224, 224)):
-        """Initialize the dataset with preloaded JSON data and the image folder."""
-        super().__init__(data=data, image_folder=image_folder)
-        self.processor = processor
-        self.image_transform = transforms.Compose([
-            transforms.Resize(image_size),  # Resize all images to the same size
-            transforms.ToTensor(),  # Convert PIL image to Tensor
-        ])
 
     def __len__(self):
-        """Return the total number of samples."""
         return len(self.data)
 
+    def load_image(self, image_id):
+        """
+        Load an image given its ID.
+        """
+        img_path = os.path.join(self.image_folder, f"{image_id}.jpg")
+        
+        if not os.path.exists(img_path):
+            print(f"File not found: {img_path}")
+            return None
+        
+        return Image.open(img_path).convert("RGB")
+
+class CLIPLocomotionDataset(BaseLocomotionDataset):
+    def __init__(self, data, image_folder, processor, mode='image_and_text'):
+        """
+        CLIP-specific dataset class supporting image-only, text-only, and image-and-text modes.
+        """
+        super().__init__(data, image_folder)
+        self.processor = processor
+        self.mode = mode
+
     def __getitem__(self, idx):
-        """Return a processed image and its corresponding label."""
+        """
+        Get a sample from the dataset for CLIP model based on the mode.
+        """
         entry = self.data[idx]
-        image = self.load_image(entry['id'])
-        
-        if image is None:
-            raise ValueError(f"Failed to load image with ID {entry['id']}.")
-        
-        # Apply the transform to resize the image
-        image = self.image_transform(image)
-        
+        image_id = entry['id']
         text = entry['text']
-        label = entry['label']  # Access the label from the entry
-        
-        inputs = self.processor(images=image, text=text, return_tensors="pt")
-        inputs = {k: v.squeeze(0) for k, v in inputs.items()}
-        
-        return inputs, label  # Return both the inputs and the label
+        label = entry['label']
+
+        image = self.load_image(image_id) if self.mode in ['image_only', 'image_and_text'] else None
+
+        inputs = {}
+        if self.mode == 'image_only':
+            inputs = self.processor(images=image, return_tensors="pt", padding=True)
+            return inputs['pixel_values'][0], label
+        elif self.mode == 'text_only':
+            inputs = self.processor(text=text, return_tensors="pt", padding=True)
+            return inputs['input_ids'][0], inputs['attention_mask'][0], label
+        elif self.mode == 'image_and_text':
+            inputs = self.processor(text=text, images=image, return_tensors="pt", padding=True)
+            return inputs['pixel_values'][0], inputs['input_ids'][0], inputs['attention_mask'][0], label
+
+def clip_collate_fn(batch, mode='image_and_text'):
+    """
+    Function to collate data into batches and pad sequences.
+    """
+    batch = [item for item in batch if item is not None]
+    
+    if mode == 'image_only':
+        pixel_values = torch.stack([item[0] for item in batch])
+        labels = [item[1] for item in batch]
+        return pixel_values, None, None, labels
+    
+    elif mode == 'text_only':
+        input_ids = [item[0] for item in batch]
+        attention_masks = [item[1] for item in batch]
+        labels = [item[2] for item in batch]
+        input_ids_padded = torch.nn.utils.rnn.pad_sequence(input_ids, batch_first=True, padding_value=0)
+        attention_masks_padded = torch.nn.utils.rnn.pad_sequence(attention_masks, batch_first=True, padding_value=0)
+        return None, input_ids_padded, attention_masks_padded, labels
+    
+    elif mode == 'image_and_text':
+        pixel_values = torch.stack([item[0] for item in batch])
+        input_ids = [item[1] for item in batch]
+        attention_masks = [item[2] for item in batch]
+        labels = [item[3] for item in batch]
+        input_ids_padded = torch.nn.utils.rnn.pad_sequence(input_ids, batch_first=True, padding_value=0)
+        attention_masks_padded = torch.nn.utils.rnn.pad_sequence(attention_masks, batch_first=True, padding_value=0)
+        return pixel_values, input_ids_padded, attention_masks_padded, labels
