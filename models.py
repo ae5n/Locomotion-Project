@@ -24,3 +24,16 @@ class CustomCLIPModel(nn.Module):
             logits_text = self.fc_text(text_embeds)
 
         return logits_image, logits_text
+
+
+class CustomViLTModel(nn.Module):
+    def __init__(self, vilt_model, num_classes):
+        super(CustomViLTModel, self).__init__()
+        self.vilt_model = vilt_model
+        self.fc = nn.Linear(vilt_model.config.hidden_size, num_classes)
+
+    def forward(self, pixel_values=None, input_ids=None, attention_mask=None):
+        outputs = self.vilt_model(pixel_values=pixel_values, input_ids=input_ids, attention_mask=attention_mask)
+        pooled_output = outputs.pooler_output
+        logits = self.fc(pooled_output)
+        return logits, None

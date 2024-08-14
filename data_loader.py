@@ -86,3 +86,38 @@ def clip_collate_fn(batch, mode='image_and_text'):
         input_ids_padded = torch.nn.utils.rnn.pad_sequence(input_ids, batch_first=True, padding_value=0)
         attention_masks_padded = torch.nn.utils.rnn.pad_sequence(attention_masks, batch_first=True, padding_value=0)
         return pixel_values, input_ids_padded, attention_masks_padded, labels
+
+class ViLTLocomotionDataset(BaseLocomotionDataset):
+    def __init__(self, data, image_folder, processor):
+        """
+        ViLT-specific dataset class.
+        """
+        super().__init__(data, image_folder)
+        self.processor = processor
+
+    def __getitem__(self, idx):
+        """
+        Get a sample from the dataset for ViLT model.
+        """
+        entry = self.data[idx]
+        image_id = entry['id']
+        text = entry['text']
+        label = entry['label']
+
+        image = self.load_image(image_id)
+
+        inputs = self.processor(text=text, images=image, return_tensors="pt", padding=True)
+        return inputs['pixel_values'][0], inputs['input_ids'][0], inputs['attention_mask'][0], label
+
+def vilt_collate_fn(batch):
+    """
+    Function to collate data into batches for ViLT.
+    """
+    batch = [item for item in batch if item is not None]
+    pixel_values = torch.stack([item[0] for item in batch])
+    input_ids = [item[1] for item in batch]
+    attention_masks = [item[2] for item in batch]
+    labels = [item[3] for item in batch]
+    input_ids_padded = torch.nn.utils.rnn.pad_sequence(input_ids, batch_first=True, padding_value=0)
+    attention_masks_padded = torch.nn.utils.rnn.pad_sequence(attention_masks, batch_first=True, padding_value=0)
+    return pixel_values, input_ids_padded, attention_masks_padded, labels

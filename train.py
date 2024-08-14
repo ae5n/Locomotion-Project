@@ -1,12 +1,12 @@
 import torch
 import argparse
 from torch.utils.data import DataLoader
-from transformers import CLIPProcessor, CLIPModel
+from transformers import CLIPProcessor, CLIPModel, ViltProcessor, ViltModel
 from sklearn.metrics import accuracy_score, classification_report
 from torch.optim.lr_scheduler import ReduceLROnPlateau
 import json
-from data_loader import CLIPLocomotionDataset, clip_collate_fn
-from models import CustomCLIPModel
+from data_loader import CLIPLocomotionDataset, ViLTLocomotionDataset, clip_collate_fn, vilt_collate_fn
+from models import CustomCLIPModel, CustomViLTModel
 
 def train_model(args):
     # Load the JSON files
@@ -15,23 +15,27 @@ def train_model(args):
     with open(args.test_json_path, 'r') as f:
         test_data = json.load(f)
 
-    # Initialize CLIP processor and model
+    # Initialize processor and model based on the selected model
     if args.model_name == "clip-vit-large-patch14-336":
         processor = CLIPProcessor.from_pretrained("openai/clip-vit-large-patch14-336")
         base_model = CLIPModel.from_pretrained("openai/clip-vit-large-patch14-336")
+        train_dataset = CLIPLocomotionDataset(train_data, args.image_folder, processor, mode=args.mode)
+        test_dataset = CLIPLocomotionDataset(test_data, args.image_folder, processor, mode=args.mode)
+        custom_model = CustomCLIPModel(base_model, len(set([item['label'] for item in train_data])), mode=args.mode)
+        collate_fn = lambda x: clip_collate_fn(x, mode=args.mode)
+    elif args.model_name == "vilt-b32-mlm":
+        processor = ViltProcessor.from_pretrained("dandelin/vilt-b32-mlm")
+        base_model = ViltModel.from_pretrained("dandelin/vilt-b32-mlm")
+        train_dataset = ViLTLocomotionDataset(train_data, args.image_folder, processor)
+        test_dataset = ViLTLocomotionDataset(test_data, args.image_folder, processor)
+        custom_model = CustomViLTModel(base_model, len(set([item['label'] for item in train_data])))
+        collate_fn = vilt_collate_fn
     else:
         raise ValueError(f"Unsupported model name: {args.model_name}")
 
-    # Set up dataset and dataloader
-    train_dataset = CLIPLocomotionDataset(train_data, args.image_folder, processor, mode=args.mode)
-    train_dataloader = DataLoader(train_dataset, batch_size=args.batch_size, shuffle=True, collate_fn=lambda x: clip_collate_fn(x, mode=args.mode))
+    train_dataloader = DataLoader(train_dataset, batch_size=args.batch_size, shuffle=True, collate_fn=collate_fn)
+    test_dataloader = DataLoader(test_dataset, batch_size=args.batch_size, shuffle=False, collate_fn=collate_fn)
 
-    test_dataset = CLIPLocomotionDataset(test_data, args.image_folder, processor, mode=args.mode)
-    test_dataloader = DataLoader(test_dataset, batch_size=args.batch_size, shuffle=False, collate_fn=lambda x: clip_collate_fn(x, mode=args.mode))
-
-    # Instantiate the custom model
-    num_classes = len(set([item['label'] for item in train_data]))
-    custom_model = CustomCLIPModel(base_model, num_classes, mode=args.mode)
     custom_model.to(args.device)
 
     # Define optimizer, criterion, and scheduler
@@ -48,21 +52,27 @@ def train_model(args):
         train_loss = 0.0
         for batch in train_dataloader:
             images, input_ids, attention_mask, labels = batch
-            if args.mode == "image_only":
+            if args.model_name == "clip-vit-large-patch14-336":
+                if args.mode == "image_only":
+                    images = images.to(args.device)
+                    logits_per_image, _ = custom_model(pixel_values=images)
+                    logits = logits_per_image
+                elif args.mode == "text_only":
+                    input_ids = input_ids.to(args.device)
+                    attention_mask = attention_mask.to(args.device)
+                    _, logits_per_text = custom_model(input_ids=input_ids, attention_mask=attention_mask)
+                    logits = logits_per_text
+                elif args.mode == "image_and_text":
+                    images = images.to(args.device)
+                    input_ids = input_ids.to(args.device)
+                    attention_mask = attention_mask.to(args.device)
+                    logits_per_image, logits_per_text = custom_model(pixel_values=images, input_ids=input_ids, attention_mask=attention_mask)
+                    logits = (logits_per_image + logits_per_text) / 2
+            elif args.model_name == "vilt-b32-mlm":
                 images = images.to(args.device)
-                logits_per_image, _ = custom_model(pixel_values=images)
-                logits = logits_per_image
-            elif args.mode == "text_only":
                 input_ids = input_ids.to(args.device)
                 attention_mask = attention_mask.to(args.device)
-                _, logits_per_text = custom_model(input_ids=input_ids, attention_mask=attention_mask)
-                logits = logits_per_text
-            elif args.mode == "image_and_text":
-                images = images.to(args.device)
-                input_ids = input_ids.to(args.device)
-                attention_mask = attention_mask.to(args.device)
-                logits_per_image, logits_per_text = custom_model(pixel_values=images, input_ids=input_ids, attention_mask=attention_mask)
-                logits = (logits_per_image + logits_per_text) / 2
+                logits, _ = custom_model(pixel_values=images, input_ids=input_ids, attention_mask=attention_mask)
 
             # Convert labels to numeric indices
             label_mapping = {label: idx for idx, label in enumerate(set([item['label'] for item in train_data]))}
@@ -92,7 +102,10 @@ def train_model(args):
             best_loss = train_loss
             trials = 0
             # Save the model when it achieves the best loss
-            torch.save(custom_model.state_dict(), f'{args.output_dir}/best_{args.model_name}_model.pth')
+            if args.model_name == "vilt-b32-mlm":
+                torch.save(custom_model.state_dict(), f'{args.output_dir}/best_{args.model_name}_model.pth')
+            else:
+                torch.save(custom_model.state_dict(), f'{args.output_dir}/best_{args.model_name}_{args.mode}_model.pth')
         else:
             trials += 1
             if trials >= args.patience:
@@ -100,7 +113,10 @@ def train_model(args):
                 break
 
     # Save the final model
-    final_model_path = f'{args.output_dir}/fine_tuned_{args.model_name}_model.pth'
+    if args.model_name == "vilt-b32-mlm":
+        final_model_path = f'{args.output_dir}/fine_tuned_{args.model_name}_model.pth'
+    else:
+        final_model_path = f'{args.output_dir}/fine_tuned_{args.model_name}_{args.mode}_model.pth'
     torch.save(custom_model.state_dict(), final_model_path)
 
     # Evaluate the model after training
@@ -114,21 +130,27 @@ def evaluate_model(model, dataloader, label_mapping, args):
     with torch.no_grad():
         for batch in dataloader:
             images, input_ids, attention_mask, labels = batch
-            if args.mode == "image_only":
+            if args.model_name == "clip-vit-large-patch14-336":
+                if args.mode == "image_only":
+                    images = images.to(args.device)
+                    logits_per_image, _ = model(pixel_values=images)
+                    logits = logits_per_image
+                elif args.mode == "text_only":
+                    input_ids = input_ids.to(args.device)
+                    attention_mask = attention_mask.to(args.device)
+                    _, logits_per_text = model(input_ids=input_ids, attention_mask=attention_mask)
+                    logits = logits_per_text
+                elif args.mode == "image_and_text":
+                    images = images.to(args.device)
+                    input_ids = input_ids.to(args.device)
+                    attention_mask = attention_mask.to(args.device)
+                    logits_per_image, logits_per_text = model(pixel_values=images, input_ids=input_ids, attention_mask=attention_mask)
+                    logits = (logits_per_image + logits_per_text) / 2
+            elif args.model_name == "vilt-b32-mlm":
                 images = images.to(args.device)
-                logits_per_image, _ = model(pixel_values=images)
-                logits = logits_per_image
-            elif args.mode == "text_only":
                 input_ids = input_ids.to(args.device)
                 attention_mask = attention_mask.to(args.device)
-                _, logits_per_text = model(input_ids=input_ids, attention_mask=attention_mask)
-                logits = logits_per_text
-            elif args.mode == "image_and_text":
-                images = images.to(args.device)
-                input_ids = input_ids.to(args.device)
-                attention_mask = attention_mask.to(args.device)
-                logits_per_image, logits_per_text = model(pixel_values=images, input_ids=input_ids, attention_mask=attention_mask)
-                logits = (logits_per_image + logits_per_text) / 2
+                logits, _ = model(pixel_values=images, input_ids=input_ids, attention_mask=attention_mask)
 
             preds = torch.argmax(logits, dim=1)
 
@@ -147,7 +169,7 @@ if __name__ == "__main__":
     parser = argparse.ArgumentParser()
 
     # Add arguments for configuration
-    parser.add_argument("model_name", type=str, help="Name of the CLIP model to use (e.g., 'clip-vit-large-patch14-336').")
+    parser.add_argument("model_name", type=str, choices=["clip-vit-large-patch14-336", "vilt-b32-mlm"], help="Model name to use (e.g., 'clip-vit-large-patch14-336' or 'vilt-b32-mlm').")
     parser.add_argument("mode", type=str, choices=["image_only", "text_only", "image_and_text"], help="Mode of training (e.g., 'image_only', 'text_only', 'image_and_text').")
     parser.add_argument("--train_json_path", type=str, default='/content/drive/MyDrive/My Data/processed data/train_data.json', help="Path to the training JSON file.")
     parser.add_argument("--test_json_path", type=str, default='/content/drive/MyDrive/My Data/processed data/test_data.json', help="Path to the test JSON file.")
