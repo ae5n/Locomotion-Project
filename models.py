@@ -1,6 +1,8 @@
 import torch
 import torch.nn as nn
 from transformers import CLIPModel
+from imagebind.models import imagebind_model
+
 
 class CustomCLIPModel(nn.Module):
     def __init__(self, clip_model, num_classes, mode='image_and_text'):
@@ -37,3 +39,27 @@ class CustomViLTModel(nn.Module):
         pooled_output = outputs.pooler_output
         logits = self.fc(pooled_output)
         return logits, None
+
+class CustomImageBindModel(nn.Module):
+    def __init__(self, num_classes, mode='image_text'):
+        super(CustomImageBindModel, self).__init__()
+        self.mode = mode
+        self.imagebind = imagebind_model.imagebind_huge(pretrained=True)
+        # Adjust the input dimension to 1024 as identified from the embeddings structure
+        self.fc = nn.Linear(1024, num_classes)
+
+    def forward(self, inputs):
+        embeddings = self.imagebind(inputs)
+
+        if 'vision' in embeddings and 'text' in embeddings:
+            # Example: averaging the embeddings from 'vision' and 'text'
+            combined_embeddings = (embeddings['vision'] + embeddings['text']) / 2
+        elif 'vision' in embeddings:
+            combined_embeddings = embeddings['vision']
+        elif 'text' in embeddings:
+            combined_embeddings = embeddings['text']
+        else:
+            raise ValueError("Unexpected output structure from ImageBind model")
+
+        logits = self.fc(combined_embeddings)
+        return logits

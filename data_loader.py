@@ -4,6 +4,8 @@ import torch
 from PIL import Image
 from torch.utils.data import Dataset
 from transformers import CLIPProcessor
+from imagebind import data as imagebind_data
+from imagebind.models.imagebind_model import ModalityType
 
 class BaseLocomotionDataset(Dataset):
     def __init__(self, data, image_folder):
@@ -121,3 +123,47 @@ def vilt_collate_fn(batch):
     input_ids_padded = torch.nn.utils.rnn.pad_sequence(input_ids, batch_first=True, padding_value=0)
     attention_masks_padded = torch.nn.utils.rnn.pad_sequence(attention_masks, batch_first=True, padding_value=0)
     return pixel_values, input_ids_padded, attention_masks_padded, labels
+
+class ImageBindLocomotionDataset(BaseLocomotionDataset):
+    def __init__(self, data, image_folder, audio_folder=None, mode='image_text', device='cpu'):
+        super().__init__(data, image_folder)
+        self.audio_folder = audio_folder
+        self.mode = mode
+        self.device = device
+        self.label_map = self.create_label_map()
+
+    def create_label_map(self):
+        # Create a label map by extracting all unique labels and assigning unique integers
+        unique_labels = set(entry['label'] for entry in self.data)
+        return {label: idx for idx, label in enumerate(unique_labels)}
+
+    def __getitem__(self, idx):
+        entry = self.data[idx]
+        inputs = {}
+
+        # Handle image data if included in mode
+        if 'image' in self.mode:
+            image_path = os.path.join(self.image_folder, f"{entry['id']}.jpg")
+            image = imagebind_data.load_and_transform_vision_data([image_path], self.device)
+            inputs[ModalityType.VISION] = image[0]  # Assuming method returns a list of tensors
+
+        # Handle text data if included in mode
+        if 'text' in self.mode:
+            text_input = imagebind_data.load_and_transform_text([entry.get('text', '')], self.device)
+            inputs[ModalityType.TEXT] = text_input[0]  # Assuming method returns a list of tensors
+
+        # Handle audio data if included in mode and audio path is specified
+        if 'audio' in self.mode and self.audio_folder:
+            audio_path = os.path.join(self.audio_folder, f"{entry['id']}.wav")
+            audio = imagebind_data.load_and_transform_audio_data([audio_path], self.device)
+            inputs[ModalityType.AUDIO] = audio[0]  # Assuming method returns a list of tensors
+
+        # Convert string labels to integers using the label map
+        label = self.label_map[entry['label']]
+        label_tensor = torch.tensor(label, dtype=torch.long)
+
+        return inputs, label_tensor
+
+    def __len__(self):
+        return len(self.data)
+        return len(self.data)
