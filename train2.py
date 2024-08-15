@@ -18,6 +18,9 @@ def train_model(args):
     train_dataset = ImageBindLocomotionDataset(train_data, args.image_folder, args.audio_folder, mode=args.mode, device=args.device)
     test_dataset = ImageBindLocomotionDataset(test_data, args.image_folder, args.audio_folder, mode=args.mode, device=args.device)
     
+    # Get the label map from the training dataset
+    label_map = train_dataset.get_label_map()
+
     # Here we define the DataLoaders
     train_dataloader = DataLoader(train_dataset, batch_size=args.batch_size, shuffle=True)
     test_dataloader = DataLoader(test_dataset, batch_size=args.batch_size, shuffle=False)
@@ -72,13 +75,16 @@ def train_model(args):
     torch.save(custom_model.state_dict(), final_model_path)
 
     # Evaluate the model after training
-    evaluate_model(custom_model, test_dataloader, args)
+    evaluate_model(custom_model, test_dataloader, label_map, args)
 
 
-def evaluate_model(model, dataloader, args):
+def evaluate_model(model, dataloader, label_map, args):
     model.eval()
     true_labels = []
     predicted_labels = []
+
+    # Reverse the label map for lookup
+    inverse_label_map = {v: k for k, v in label_map.items()}
 
     with torch.no_grad():
         for inputs, labels in dataloader:
@@ -90,6 +96,10 @@ def evaluate_model(model, dataloader, args):
 
             true_labels.extend(labels.tolist())
             predicted_labels.extend(preds.cpu().numpy())
+
+    # Convert indices to labels
+    true_labels = [inverse_label_map[label] for label in true_labels]
+    predicted_labels = [inverse_label_map[label] for label in predicted_labels]
 
     # Calculate accuracy and print classification report
     accuracy = accuracy_score(true_labels, predicted_labels)

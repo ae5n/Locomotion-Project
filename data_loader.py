@@ -136,6 +136,10 @@ class ImageBindLocomotionDataset(BaseLocomotionDataset):
         # Create a label map by extracting all unique labels and assigning unique integers
         unique_labels = set(entry['label'] for entry in self.data)
         return {label: idx for idx, label in enumerate(unique_labels)}
+    
+    def get_label_map(self):
+        #Returns the label map.
+        return self.label_map
 
     def __getitem__(self, idx):
         entry = self.data[idx]
