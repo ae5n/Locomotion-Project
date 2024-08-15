@@ -5,6 +5,7 @@ from transformers import CLIPProcessor, CLIPModel, ViltProcessor, ViltModel
 from sklearn.metrics import accuracy_score, classification_report
 from torch.optim.lr_scheduler import ReduceLROnPlateau
 import json
+import wandb
 
 from data_loader import CLIPLocomotionDataset, ViLTLocomotionDataset, clip_collate_fn, vilt_collate_fn
 from models import CustomCLIPModel, CustomViLTModel
@@ -50,6 +51,27 @@ def train_model(args):
     test_dataloader = DataLoader(test_dataset, batch_size=args.batch_size, shuffle=False, collate_fn=collate_fn)
 
     custom_model.to(args.device)
+
+    # Initialize WandB if the project name is provided
+    if args.wandb_project:
+        wandb.init(project=args.wandb_project)
+        wandb.config.update(args)  # Save the args to WandB config
+    
+        # Calculate and log model parameters once
+        model_params = sum(p.numel() for p in custom_model.parameters() if p.requires_grad)
+        total_params = sum(p.numel() for p in custom_model.parameters())
+        
+        wandb.config.update({
+            "model_name": args.model_name,
+            "mode": args.mode,  # Log the mode (e.g., 'image_only', 'text_only', etc.)
+            "trainable_parameters": model_params,  # Log trainable parameters
+            "total_parameters": total_params,  # Log total parameters
+            "cuda_version": torch.version.cuda,
+            "gpu_name": torch.cuda.get_device_name(0) if args.device == 'cuda' else "CPU"
+        })
+        
+        # Log the model architecture and gradients/weights
+        wandb.watch(custom_model, log="all", log_freq=10)  # Log gradients and parameters at each 10th step
 
     # Define optimizer, criterion, and scheduler
     optimizer = torch.optim.AdamW(custom_model.parameters(), lr=args.learning_rate)
@@ -111,6 +133,16 @@ def train_model(args):
 
         train_loss /= len(train_dataloader)
         print(f"Epoch {epoch+1}/{args.num_epochs}, Loss: {train_loss}")
+
+        # Log training metrics to WandB
+        if args.wandb_project:
+            wandb.log({
+                "epoch": epoch + 1,
+                "train_loss": train_loss,
+                "learning_rate": optimizer.param_groups[0]['lr'],
+                "gpu_memory_usage": torch.cuda.max_memory_allocated(args.device) / (1024 ** 2) if args.device == 'cuda' else 0,
+                "cpu_memory_usage": torch.cuda.memory_reserved(args.device) / (1024 ** 2) if args.device == 'cuda' else 0
+            })
 
         # Learning rate scheduling
         scheduler.step(train_loss)
@@ -191,8 +223,20 @@ def evaluate_model(model, dataloader, label_mapping, args):
 
     # Calculate accuracy and print classification report
     accuracy = accuracy_score(true_labels, predicted_labels)
+    report = classification_report(true_labels, predicted_labels, output_dict=True)
+
     print(f"Accuracy: {accuracy}")
     print(classification_report(true_labels, predicted_labels))
+
+    # Log evaluation metrics to WandB
+    if args.wandb_project:
+        wandb.log({
+            "accuracy": accuracy,
+            "precision": report['weighted avg']['precision'],
+            "recall": report['weighted avg']['recall'],
+            "f1_score": report['weighted avg']['f1-score'],
+            "classification_report": report
+        })
 
 if __name__ == "__main__":
     parser = argparse.ArgumentParser()
@@ -210,6 +254,7 @@ if __name__ == "__main__":
     parser.add_argument("--patience", type=int, default=5, help="Patience for early stopping.")
     parser.add_argument("--output_dir", type=str, default='/content/drive/MyDrive/My Data', help="Directory to save the model.")
     parser.add_argument("--device", type=str, default="cuda" if torch.cuda.is_available() else "cpu", help="Device to use for training.")
+    parser.add_argument("--wandb_project", type=str, help="Weights and Biases project name. If provided, metrics will be logged to WandB.")
 
     args = parser.parse_args()
 
