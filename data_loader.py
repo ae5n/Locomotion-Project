@@ -3,9 +3,6 @@ import json
 import torch
 from PIL import Image
 from torch.utils.data import Dataset
-from transformers import CLIPProcessor
-from imagebind import data as imagebind_data
-from imagebind.models.imagebind_model import ModalityType
 
 class BaseLocomotionDataset(Dataset):
     def __init__(self, data, image_folder):
@@ -31,7 +28,7 @@ class BaseLocomotionDataset(Dataset):
         return Image.open(img_path).convert("RGB")
 
 class CLIPLocomotionDataset(BaseLocomotionDataset):
-    def __init__(self, data, image_folder, processor, mode='image_and_text'):
+    def __init__(self, data, image_folder, processor, mode='image_text'):
         """
         CLIP-specific dataset class supporting image-only, text-only, and image-and-text modes.
         """
@@ -48,7 +45,7 @@ class CLIPLocomotionDataset(BaseLocomotionDataset):
         text = entry['text']
         label = entry['label']
 
-        image = self.load_image(image_id) if self.mode in ['image_only', 'image_and_text'] else None
+        image = self.load_image(image_id) if self.mode in ['image_only', 'image_text'] else None
 
         inputs = {}
         if self.mode == 'image_only':
@@ -57,11 +54,11 @@ class CLIPLocomotionDataset(BaseLocomotionDataset):
         elif self.mode == 'text_only':
             inputs = self.processor(text=text, return_tensors="pt", padding=True)
             return inputs['input_ids'][0], inputs['attention_mask'][0], label
-        elif self.mode == 'image_and_text':
+        elif self.mode == 'image_text':
             inputs = self.processor(text=text, images=image, return_tensors="pt", padding=True)
             return inputs['pixel_values'][0], inputs['input_ids'][0], inputs['attention_mask'][0], label
 
-def clip_collate_fn(batch, mode='image_and_text'):
+def clip_collate_fn(batch, mode='image_text'):
     """
     Function to collate data into batches and pad sequences.
     """
@@ -80,7 +77,7 @@ def clip_collate_fn(batch, mode='image_and_text'):
         attention_masks_padded = torch.nn.utils.rnn.pad_sequence(attention_masks, batch_first=True, padding_value=0)
         return None, input_ids_padded, attention_masks_padded, labels
     
-    elif mode == 'image_and_text':
+    elif mode == 'image_text':
         pixel_values = torch.stack([item[0] for item in batch])
         input_ids = [item[1] for item in batch]
         attention_masks = [item[2] for item in batch]
@@ -131,6 +128,11 @@ class ImageBindLocomotionDataset(BaseLocomotionDataset):
         self.mode = mode
         self.device = device
         self.label_map = self.create_label_map()
+        # Import imagebind-related modules only if this class is used
+        from imagebind import data as imagebind_data
+        from imagebind.models.imagebind_model import ModalityType
+        self.imagebind_data = imagebind_data
+        self.ModalityType = ModalityType
 
     def create_label_map(self):
         # Create a label map by extracting all unique labels and assigning unique integers
