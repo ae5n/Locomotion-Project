@@ -38,11 +38,10 @@ class CustomViLTModel(nn.Module):
         return logits, None
 
 class CustomImageBindModel(nn.Module):
-    def __init__(self, num_classes, mode='image_text'):
+    def __init__(self, imagebind_model, num_classes, mode='image_text'):
         super(CustomImageBindModel, self).__init__()
         self.mode = mode
-        from imagebind.models import imagebind_model
-        self.imagebind = imagebind_model.imagebind_huge(pretrained=True)
+        self.imagebind = imagebind_model
         # Adjust the input dimension to 1024 as identified from the embeddings structure
         self.fc = nn.Linear(1024, num_classes)
 

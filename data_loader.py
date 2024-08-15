@@ -11,6 +11,16 @@ class BaseLocomotionDataset(Dataset):
         """
         self.data = data
         self.image_folder = image_folder
+        self.label_map = self.create_label_map()
+
+    def create_label_map(self):
+        # Create a label map by extracting all unique labels and assigning unique integers
+        unique_labels = set(entry['label'] for entry in self.data)
+        return {label: idx for idx, label in enumerate(unique_labels)}
+
+    def get_label_map(self):
+        # Returns the label map.
+        return self.label_map
 
     def __len__(self):
         return len(self.data)
@@ -50,13 +60,13 @@ class CLIPLocomotionDataset(BaseLocomotionDataset):
         inputs = {}
         if self.mode == 'image_only':
             inputs = self.processor(images=image, return_tensors="pt", padding=True)
-            return inputs['pixel_values'][0], label
+            return inputs['pixel_values'][0], self.label_map[label]
         elif self.mode == 'text_only':
             inputs = self.processor(text=text, return_tensors="pt", padding=True)
-            return inputs['input_ids'][0], inputs['attention_mask'][0], label
+            return inputs['input_ids'][0], inputs['attention_mask'][0], self.label_map[label]
         elif self.mode == 'image_text':
             inputs = self.processor(text=text, images=image, return_tensors="pt", padding=True)
-            return inputs['pixel_values'][0], inputs['input_ids'][0], inputs['attention_mask'][0], label
+            return inputs['pixel_values'][0], inputs['input_ids'][0], inputs['attention_mask'][0], self.label_map[label]
 
 def clip_collate_fn(batch, mode='image_text'):
     """
@@ -106,7 +116,7 @@ class ViLTLocomotionDataset(BaseLocomotionDataset):
         image = self.load_image(image_id)
 
         inputs = self.processor(text=text, images=image, return_tensors="pt", padding=True)
-        return inputs['pixel_values'][0], inputs['input_ids'][0], inputs['attention_mask'][0], label
+        return inputs['pixel_values'][0], inputs['input_ids'][0], inputs['attention_mask'][0], self.label_map[label]
 
 def vilt_collate_fn(batch):
     """
@@ -127,21 +137,15 @@ class ImageBindLocomotionDataset(BaseLocomotionDataset):
         self.audio_folder = audio_folder
         self.mode = mode
         self.device = device
-        self.label_map = self.create_label_map()
-        # Import imagebind-related modules only if this class is used
+        self.imagebind_data = None
+        self.ModalityType = None
+        self._lazy_import_imagebind()
+
+    def _lazy_import_imagebind(self):
         from imagebind import data as imagebind_data
         from imagebind.models.imagebind_model import ModalityType
         self.imagebind_data = imagebind_data
         self.ModalityType = ModalityType
-
-    def create_label_map(self):
-        # Create a label map by extracting all unique labels and assigning unique integers
-        unique_labels = set(entry['label'] for entry in self.data)
-        return {label: idx for idx, label in enumerate(unique_labels)}
-    
-    def get_label_map(self):
-        #Returns the label map.
-        return self.label_map
 
     def __getitem__(self, idx):
         entry = self.data[idx]
@@ -150,19 +154,19 @@ class ImageBindLocomotionDataset(BaseLocomotionDataset):
         # Handle image data if included in mode
         if 'image' in self.mode:
             image_path = os.path.join(self.image_folder, f"{entry['id']}.jpg")
-            image = imagebind_data.load_and_transform_vision_data([image_path], self.device)
-            inputs[ModalityType.VISION] = image[0]  # Assuming method returns a list of tensors
+            image = self.imagebind_data.load_and_transform_vision_data([image_path], self.device)
+            inputs[self.ModalityType.VISION] = image[0]  # Assuming method returns a list of tensors
 
         # Handle text data if included in mode
         if 'text' in self.mode:
-            text_input = imagebind_data.load_and_transform_text([entry.get('text', '')], self.device)
-            inputs[ModalityType.TEXT] = text_input[0]  # Assuming method returns a list of tensors
+            text_input = self.imagebind_data.load_and_transform_text([entry.get('text', '')], self.device)
+            inputs[self.ModalityType.TEXT] = text_input[0]  # Assuming method returns a list of tensors
 
         # Handle audio data if included in mode and audio path is specified
         if 'audio' in self.mode and self.audio_folder:
             audio_path = os.path.join(self.audio_folder, f"{entry['id']}.wav")
-            audio = imagebind_data.load_and_transform_audio_data([audio_path], self.device)
-            inputs[ModalityType.AUDIO] = audio[0]  # Assuming method returns a list of tensors
+            audio = self.imagebind_data.load_and_transform_audio_data([audio_path], self.device)
+            inputs[self.ModalityType.AUDIO] = audio[0]  # Assuming method returns a list of tensors
 
         # Convert string labels to integers using the label map
         label = self.label_map[entry['label']]
@@ -171,5 +175,4 @@ class ImageBindLocomotionDataset(BaseLocomotionDataset):
         return inputs, label_tensor
 
     def __len__(self):
-        return len(self.data)
         return len(self.data)
