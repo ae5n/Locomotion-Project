@@ -1,13 +1,43 @@
 import torch
 import torch.nn as nn
 
+class CustomFusionModule(nn.Module):
+    def __init__(self, method, embedding_dim1, embedding_dim2=None):
+        super(CustomFusionModule, self).__init__()
+        self.method = method
+        if embedding_dim2 is None:
+            embedding_dim2 = embedding_dim1
+
+        if self.method == 'concat':
+            self.fc = nn.Linear(embedding_dim1 + embedding_dim2, embedding_dim1)
+        elif self.method == 'cross_attention':
+            self.proj_emb1 = nn.Linear(embedding_dim1, embedding_dim1)
+            self.proj_emb2 = nn.Linear(embedding_dim2, embedding_dim1)
+            self.cross_attention = nn.MultiheadAttention(embed_dim=embedding_dim1, num_heads=8)
+
+    def forward(self, emb1, emb2):
+        if self.method == 'average':
+            return (emb1 + emb2) / 2
+        elif self.method == 'concat':
+            combined = torch.cat((emb1, emb2), dim=-1)
+            return self.fc(combined)
+        elif self.method == 'cross_attention':
+            emb1 = self.proj_emb1(emb1).unsqueeze(1)  # Project and add a sequence dimension
+            emb2 = self.proj_emb2(emb2).unsqueeze(1)  # Project and add a sequence dimension
+            attn_output, _ = self.cross_attention(emb1, emb2, emb2)
+            return attn_output.squeeze(1)
+        else:
+            raise ValueError(f"Unknown fusion method: {self.method}")
+
 class CustomCLIPModel(nn.Module):
-    def __init__(self, clip_model, num_classes, mode='image_text'):
+    def __init__(self, clip_model, num_classes, mode='image_text', fusion_method='average'):
         super(CustomCLIPModel, self).__init__()
         self.clip_model = clip_model
         self.mode = mode
+        self.fusion_method = fusion_method
         self.fc_image = nn.Linear(self.clip_model.vision_model.config.hidden_size, num_classes) if mode in ['image_only', 'image_text'] else None
         self.fc_text = nn.Linear(self.clip_model.text_model.config.hidden_size, num_classes) if mode in ['text_only', 'image_text'] else None
+        self.fusion = CustomFusionModule(fusion_method, self.clip_model.vision_model.config.hidden_size, self.clip_model.text_model.config.hidden_size)
 
     def forward(self, pixel_values=None, input_ids=None, attention_mask=None):
         logits_image, logits_text = None, None
@@ -22,9 +52,9 @@ class CustomCLIPModel(nn.Module):
             text_embeds = text_outputs.pooler_output
             logits_text = self.fc_text(text_embeds)
 
-        # Fusion strategy
         if self.mode == 'image_text':
-            return (logits_image + logits_text) / 2
+            fused_output = self.fusion(image_embeds, text_embeds)
+            return fused_output
 
         return logits_image if logits_image is not None else logits_text
 
@@ -42,23 +72,27 @@ class CustomViLTModel(nn.Module):
         return logits, None
 
 class CustomImageBindModel(nn.Module):
-    def __init__(self, imagebind_model, num_classes, mode='image_text'):
+    def __init__(self, imagebind_model, num_classes, mode='image_text', fusion_method='average'):
         super(CustomImageBindModel, self).__init__()
         self.mode = mode
         self.imagebind = imagebind_model
-        # Adjust the input dimension to 1024 as identified from the embeddings structure
+        self.fusion_method = fusion_method
+        self.fusion = CustomFusionModule(fusion_method, 1024, 1024)  # Adjust dimensions for ImageBind
         self.fc = nn.Linear(1024, num_classes)
 
     def forward(self, inputs):
         embeddings = self.imagebind(inputs)
 
-        if 'vision' in embeddings and 'text' in embeddings:
-            # Example: averaging the embeddings from 'vision' and 'text'
-            combined_embeddings = (embeddings['vision'] + embeddings['text']) / 2
+        if self.mode == 'image_text':
+            combined_embeddings = self.fusion(embeddings['vision'], embeddings['text'])
+        elif self.mode == 'image_audio':
+            combined_embeddings = self.fusion(embeddings['vision'], embeddings['audio'])
         elif 'vision' in embeddings:
             combined_embeddings = embeddings['vision']
         elif 'text' in embeddings:
             combined_embeddings = embeddings['text']
+        elif 'audio' in embeddings:
+            combined_embeddings = embeddings['audio']
         else:
             raise ValueError("Unexpected output structure from ImageBind model")
 

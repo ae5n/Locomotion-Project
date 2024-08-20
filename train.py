@@ -23,7 +23,7 @@ def train_model(args):
         base_model = CLIPModel.from_pretrained("openai/clip-vit-large-patch14-336")
         train_dataset = CLIPLocomotionDataset(train_data, args.image_folder, processor, mode=args.mode)
         test_dataset = CLIPLocomotionDataset(test_data, args.image_folder, processor, mode=args.mode)
-        custom_model = CustomCLIPModel(base_model, len(train_dataset.get_label_map()), mode=args.mode)
+        custom_model = CustomCLIPModel(base_model, len(train_dataset.get_label_map()), mode=args.mode, fusion_method=args.fusion_method)
         collate_fn = lambda x: clip_collate_fn(x, mode=args.mode)
 
     elif args.model_name == "vilt-b32-mlm":
@@ -41,7 +41,7 @@ def train_model(args):
         base_model = imagebind_model.imagebind_huge(pretrained=True)
         train_dataset = ImageBindLocomotionDataset(train_data, args.image_folder, args.audio_folder, mode=args.mode, device=args.device)
         test_dataset = ImageBindLocomotionDataset(test_data, args.image_folder, args.audio_folder, mode=args.mode, device=args.device)
-        custom_model = CustomImageBindModel(base_model, len(train_dataset.get_label_map()), mode=args.mode)
+        custom_model = CustomImageBindModel(base_model, len(train_dataset.get_label_map()), mode=args.mode, fusion_method=args.fusion_method)
         collate_fn = None  # ImageBind doesn't require a special collate function
 
     else:
@@ -50,7 +50,9 @@ def train_model(args):
     train_dataloader = DataLoader(train_dataset, batch_size=args.batch_size, shuffle=True, collate_fn=collate_fn)
     test_dataloader = DataLoader(test_dataset, batch_size=args.batch_size, shuffle=False, collate_fn=collate_fn)
 
-    custom_model.to(args.device)
+    custom_model.to(args.device) 
+
+    fusion_suffix = f"_{args.fusion_method}" if args.model_name != "vilt-b32-mlm" and args.mode in ["image_text", "image_audio"] else ""
 
     # Initialize WandB if the project name is provided
     if args.wandb_project:
@@ -148,17 +150,20 @@ def train_model(args):
             best_loss = train_loss
             trials = 0
             # Save the model when it achieves the best loss
-            model_filename = f'best_{args.model_name}_{args.mode}_btch{args.batch_size}epch{args.num_epochs}.pth'
+            model_filename = f'best_{args.model_name}_{args.mode}_{fusion_suffix}_btch{args.batch_size}epch{args.num_epochs}.pth'
             torch.save(custom_model.state_dict(), f'{args.output_dir}/{model_filename}')
         else:
             trials += 1
             if trials >= args.patience:
                 print(f"Early stopping on epoch {epoch+1}")
                 break
+    
+    final_loss = train_loss
 
-    # Save the final model
-    final_model_filename = f'fine_tuned_{args.model_name}_{args.mode}_btch{args.batch_size}epch{args.num_epochs}.pth'
-    torch.save(custom_model.state_dict(), f'{args.output_dir}/{final_model_filename}')
+    # If the final model is better than the saved best model, overwrite it
+    if final_loss <= best_loss:
+        print("Final model is better than or equal to the best model during training. Overwriting the best model.")
+        torch.save(custom_model.state_dict(), f'{args.output_dir}/{model_filename}')
 
     # Evaluate the model after training
     evaluate_model(custom_model, test_dataloader, train_dataset.get_label_map(), args)
@@ -236,7 +241,8 @@ if __name__ == "__main__":
 
     # Add arguments for configuration
     parser.add_argument("model_name", type=str, choices=["clip-vit-large-patch14-336", "vilt-b32-mlm", "imagebind_huge"], help="Model name to use (e.g., 'clip-vit-large-patch14-336', 'vilt-b32-mlm', 'imagebind_huge').")
-    parser.add_argument("mode", type=str, choices=["image_only", "text_only", "image_text", "image_audio"], help="Mode of training (e.g., 'image_only', 'text_only', 'image_text', 'image_audio').")
+    parser.add_argument("mode", type=str, choices=["image_only", "text_only", "image_text", "image_audio", "audio_only"], help="Mode of training (e.g., 'image_only', 'text_only', 'image_text', 'image_audio').")
+    parser.add_argument("--fusion_method", type=str, choices=["average", "concat", "cross_attention"], default="average", help="Fusion method to use for combining embeddings.")
     parser.add_argument("--train_json_path", type=str, default='/content/drive/MyDrive/My Data/processed data/train_data.json', help="Path to the training JSON file.")
     parser.add_argument("--test_json_path", type=str, default='/content/drive/MyDrive/My Data/processed data/test_data.json', help="Path to the test JSON file.")
     parser.add_argument("--image_folder", type=str, default='/content/drive/MyDrive/My Data/processed data/images', help="Path to the image folder.")
