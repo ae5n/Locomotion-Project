@@ -22,7 +22,11 @@ class CustomCLIPModel(nn.Module):
             text_embeds = text_outputs.pooler_output
             logits_text = self.fc_text(text_embeds)
 
-        return logits_image, logits_text
+        # Fusion strategy
+        if self.mode == 'image_text':
+            return (logits_image + logits_text) / 2
+
+        return logits_image if logits_image is not None else logits_text
 
 
 class CustomViLTModel(nn.Module):

@@ -91,20 +91,16 @@ def train_model(args):
                 images, input_ids, attention_mask, labels = batch
                 if args.mode == "image_only":
                     images = images.to(args.device)
-                    logits_per_image, _ = custom_model(pixel_values=images)
-                    logits = logits_per_image
+                    logits = custom_model(pixel_values=images)
                 elif args.mode == "text_only":
                     input_ids = input_ids.to(args.device)
                     attention_mask = attention_mask.to(args.device)
-                    _, logits_per_text = custom_model(input_ids=input_ids, attention_mask=attention_mask)
-                    logits = logits_per_text
+                    logits = custom_model(input_ids=input_ids, attention_mask=attention_mask)
                 elif args.mode == "image_text":
                     images = images.to(args.device)
                     input_ids = input_ids.to(args.device)
                     attention_mask = attention_mask.to(args.device)
-                    logits_per_image, logits_per_text = custom_model(pixel_values=images, input_ids=input_ids, attention_mask=attention_mask)
-                    logits = (logits_per_image + logits_per_text) / 2
-
+                    logits = custom_model(pixel_values=images, input_ids=input_ids, attention_mask=attention_mask)
             elif args.model_name == "vilt-b32-mlm":
                 images, input_ids, attention_mask, labels = batch
                 images = images.to(args.device)
@@ -181,19 +177,16 @@ def evaluate_model(model, dataloader, label_mapping, args):
                 images, input_ids, attention_mask, labels = batch
                 if args.mode == "image_only":
                     images = images.to(args.device)
-                    logits_per_image, _ = model(pixel_values=images)
-                    logits = logits_per_image
+                    logits = model(pixel_values=images)
                 elif args.mode == "text_only":
                     input_ids = input_ids.to(args.device)
                     attention_mask = attention_mask.to(args.device)
-                    _, logits_per_text = model(input_ids=input_ids, attention_mask=attention_mask)
-                    logits = logits_per_text
+                    logits = model(input_ids=input_ids, attention_mask=attention_mask)
                 elif args.mode == "image_text":
                     images = images.to(args.device)
                     input_ids = input_ids.to(args.device)
                     attention_mask = attention_mask.to(args.device)
-                    logits_per_image, logits_per_text = model(pixel_values=images, input_ids=input_ids, attention_mask=attention_mask)
-                    logits = (logits_per_image + logits_per_text) / 2
+                    logits = model(pixel_values=images, input_ids=input_ids, attention_mask=attention_mask)
 
             elif args.model_name == "vilt-b32-mlm":
                 images, input_ids, attention_mask, labels = batch
