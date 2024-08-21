@@ -22,10 +22,11 @@ class CustomFusionModule(nn.Module):
             combined = torch.cat((emb1, emb2), dim=-1)
             return self.fc(combined)
         elif self.method == 'cross_attention':
-            emb1 = self.proj_emb1(emb1).unsqueeze(1)  # Project and add a sequence dimension
-            emb2 = self.proj_emb2(emb2).unsqueeze(1)  # Project and add a sequence dimension
+            emb1 = self.proj_emb1(emb1).unsqueeze(1).permute(1, 0, 2)  # (batch_size, embed_dim) -> (1, batch_size, embed_dim) -> (1, batch_size, embed_dim)
+            emb2 = self.proj_emb2(emb2).unsqueeze(1).permute(1, 0, 2)  # (batch_size, embed_dim) -> (1, batch_size, embed_dim) -> (1, batch_size, embed_dim)
             attn_output, _ = self.cross_attention(emb1, emb2, emb2)
-            return attn_output.squeeze(1)
+            return attn_output.permute(1, 0, 2).squeeze(1)  # Back to (batch_size, embed_dim)
+
         else:
             raise ValueError(f"Unknown fusion method: {self.method}")
 
