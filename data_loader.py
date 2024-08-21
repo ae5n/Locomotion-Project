@@ -176,3 +176,35 @@ class ImageBindLocomotionDataset(BaseLocomotionDataset):
 
     def __len__(self):
         return len(self.data)
+
+class FlorenceLocomotionDataset(BaseLocomotionDataset):
+    def __init__(self, data, image_folder, use_prompt=True):
+        # Initialize the base class with the data and image folder
+        super().__init__(data, image_folder)
+        self.use_prompt = use_prompt
+
+    def __getitem__(self, idx):
+        # Get the data entry at the specified index
+        entry = self.data[idx]
+
+        if self.use_prompt:
+            # Generate the prompt by integrating the command
+            text_input = (
+                "You are provided with an image containing 9 field-of-view (FOV) frames from smart glasses worn by a user performing a locomotion activity "
+                "in an industrial environment. The frames capture the user’s perspective from 3 seconds before to 2 seconds after the activity begins. "
+                "Along with the frames, the user gives the following command: \"{}\". Analyze both the image and the command to identify the locomotion activity. "
+                "Choose the most accurate category: Vertical Ladder Up Climbing, Vertical Ladder Down Climbing, Construction Ladder Up Climbing, Construction Ladder Down Climbing, "
+                "Level-ground Navigation, Stair Ascension, Stair Descension, Stepping over Box, Stepping over Pipe, Low Space Navigation, Sitting Activity, Standing Activity, or None if no match is found. "
+                "Respond with the exact category name only, without any explanations."
+            ).format(entry['text'])
+        else:
+            # Directly use the command from the JSON
+            text_input = entry['text']
+
+        # Extract the label and load the image
+        label = entry['label']
+        image = self.load_image(entry['id'])
+
+        # Return the text input, label, and image
+        return text_input, label, image
+
