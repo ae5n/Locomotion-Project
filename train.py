@@ -1,13 +1,14 @@
 import torch
 import argparse
 from torch.utils.data import DataLoader
-from transformers import CLIPProcessor, CLIPModel, ViltProcessor, ViltModel
+from transformers import CLIPProcessor, CLIPModel, ViltProcessor, ViltModel, AutoProcessor, AutoModelForCausalLM
 from sklearn.metrics import accuracy_score, classification_report
 from torch.optim.lr_scheduler import ReduceLROnPlateau
 import json
 import wandb
+import os
 
-from data_loader import CLIPLocomotionDataset, ViLTLocomotionDataset, clip_collate_fn, vilt_collate_fn
+from data_loader import CLIPLocomotionDataset, ViLTLocomotionDataset, clip_collate_fn, vilt_collate_fn, FlorenceLocomotionDataset, florence_collate_fn
 from models import CustomCLIPModel, CustomViLTModel
 
 def train_model(args):
@@ -43,6 +44,19 @@ def train_model(args):
         test_dataset = ImageBindLocomotionDataset(test_data, args.image_folder, args.audio_folder, mode=args.mode, device=args.device)
         custom_model = CustomImageBindModel(base_model, len(train_dataset.get_label_map()), mode=args.mode, fusion_method=args.fusion_method)
         collate_fn = None  # ImageBind doesn't require a special collate function
+    
+    elif args.model_name == "microsoft/Florence-2-large":
+        processor = AutoProcessor.from_pretrained(args.model_name, trust_remote_code=True)
+        base_model = AutoModelForCausalLM.from_pretrained(args.model_name, trust_remote_code=True)
+        train_dataset = FlorenceLocomotionDataset(train_data, args.image_folder, use_prompt=args.use_prompt, mode=args.mode)
+        test_dataset = FlorenceLocomotionDataset(test_data, args.image_folder, use_prompt=args.use_prompt, mode=args.mode)
+        collate_fn = lambda x: florence_collate_fn(x, processor, mode=args.mode)
+        custom_model = base_model  # Use the base model directly for Florence-2
+
+        # Optionally freeze the vision encoder
+        if args.freeze_vision_encoder:
+            for param in custom_model.vision_tower.parameters():
+                param.requires_grad = False
 
     else:
         raise ValueError(f"Unsupported model name: {args.model_name}")
@@ -77,7 +91,8 @@ def train_model(args):
 
     # Define optimizer, criterion, and scheduler
     optimizer = torch.optim.AdamW(custom_model.parameters(), lr=args.learning_rate)
-    criterion = torch.nn.CrossEntropyLoss()
+    if args.model_name != "microsoft/Florence-2-large":
+        criterion = torch.nn.CrossEntropyLoss()
     scheduler = ReduceLROnPlateau(optimizer, mode='min', factor=0.1, patience=3, verbose=True)
 
     # Training loop with early stopping
@@ -114,11 +129,17 @@ def train_model(args):
                 inputs, labels = batch
                 inputs = {k: v.to(args.device) for k, v in inputs.items()}
                 logits = custom_model(inputs)
+            
+            elif args.model_name == "microsoft/Florence-2-large":
+                inputs, labels = batch
+                inputs = {k: v.to(args.device) for k, v in inputs.items()}
+                outputs = custom_model(**inputs, labels=labels.to(args.device))
+                loss = outputs.loss
 
-            # Convert labels list to tensor
-            labels = torch.tensor(labels).to(args.device)
-
-            loss = criterion(logits, labels)
+            if args.model_name != "microsoft/Florence-2-large":
+                # Convert labels list to tensor
+                labels = torch.tensor(labels).to(args.device)
+                loss = criterion(logits, labels)
 
             optimizer.zero_grad()
             loss.backward()
@@ -150,8 +171,10 @@ def train_model(args):
             best_loss = train_loss
             trials = 0
             # Save the model when it achieves the best loss
-            model_filename = f'best_{args.model_name}_{args.mode}_{fusion_suffix}_btch{args.batch_size}epch{args.num_epochs}.pth'
+            model_filename = f'best_{args.model_name.replace("/", "_")}_{args.mode}_{fusion_suffix}_btch{args.batch_size}epch{args.num_epochs}.pth'
             torch.save(custom_model.state_dict(), f'{args.output_dir}/{model_filename}')
+            if args.model_name == "microsoft/Florence-2-large":
+                processor.save_pretrained(os.path.join(args.output_dir, f"best_florence_processor_epoch{epoch + 1}.pth"))
         else:
             trials += 1
             if trials >= args.patience:
@@ -164,11 +187,12 @@ def train_model(args):
     if final_loss <= best_loss:
         print("Final model is better than or equal to the best model during training. Overwriting the best model.")
         torch.save(custom_model.state_dict(), f'{args.output_dir}/{model_filename}')
-
+        if args.model_name == "microsoft/Florence-2-large":
+            processor.save_pretrained(os.path.join(args.output_dir, "finetuned_florence_processor.pth"))
     # Evaluate the model after training
-    evaluate_model(custom_model, test_dataloader, train_dataset.get_label_map(), args)
+    evaluate_model(custom_model, test_dataloader, train_dataset.get_label_map(), args, processor)
 
-def evaluate_model(model, dataloader, label_mapping, args):
+def evaluate_model(model, dataloader, label_mapping, args, processor):
     model.eval()
     true_labels = []
     predicted_labels = []
@@ -205,19 +229,31 @@ def evaluate_model(model, dataloader, label_mapping, args):
                 inputs = {k: v.to(args.device) for k, v in inputs.items()}
                 logits = model(inputs)
                 labels = labels.cpu().tolist()  # Convert to list of indices for ImageBind
+            
+            elif args.model_name == "microsoft/Florence-2-large":
+                inputs, labels = batch
+                inputs = {k: v.to(args.device) for k, v in inputs.items()}
+                generated_ids = model.generate(input_ids=inputs['input_ids'], pixel_values=inputs['pixel_values'], max_new_tokens=50)
+                generated_text = processor.batch_decode(generated_ids, skip_special_tokens=True)
+                true_text = processor.batch_decode(labels, skip_special_tokens=True)
+                print(f"Generated text: {generated_text}, True label: {true_text}")
+                predicted_labels.extend(generated_text)
+                true_labels.extend(true_text)
+            
+            if args.model_name != "microsoft/Florence-2-large":
+                preds = torch.argmax(logits, dim=1)
+                if isinstance(labels, torch.Tensor):  # Handle labels for ImageBind
+                    true_labels.extend(labels.cpu().tolist())
+                else:  # Handle labels for CLIP and ViLT
+                    true_labels.extend(labels)
 
-            preds = torch.argmax(logits, dim=1)
-
-            if isinstance(labels, torch.Tensor):  # Handle labels for ImageBind
-                true_labels.extend(labels.cpu().tolist())
-            else:  # Handle labels for CLIP and ViLT
-                true_labels.extend(labels)
-
-            predicted_labels.extend(preds.cpu().numpy())
+                predicted_labels.extend(preds.cpu().numpy())
 
     # Convert indices to labels using the inverse label map
-    true_labels = [inverse_label_map[label] for label in true_labels]
-    predicted_labels = [inverse_label_map[label] for label in predicted_labels]
+    if args.model_name != "microsoft/Florence-2-large":
+        true_labels = [inverse_label_map[label] for label in true_labels]
+        predicted_labels = [inverse_label_map[label] for label in predicted_labels]
+
 
     # Calculate accuracy and print classification report
     accuracy = accuracy_score(true_labels, predicted_labels)
@@ -240,7 +276,7 @@ if __name__ == "__main__":
     parser = argparse.ArgumentParser()
 
     # Add arguments for configuration
-    parser.add_argument("model_name", type=str, choices=["clip-vit-large-patch14-336", "vilt-b32-mlm", "imagebind_huge"], help="Model name to use (e.g., 'clip-vit-large-patch14-336', 'vilt-b32-mlm', 'imagebind_huge').")
+    parser.add_argument("model_name", type=str, choices=["clip-vit-large-patch14-336", "vilt-b32-mlm", "imagebind_huge", "microsoft/Florence-2-large"], help="Model name to use (e.g., 'clip-vit-large-patch14-336', 'vilt-b32-mlm', 'imagebind_huge', 'microsoft/Florence-2-large').")
     parser.add_argument("mode", type=str, choices=["image_only", "text_only", "image_text", "image_audio", "audio_only"], help="Mode of training (e.g., 'image_only', 'text_only', 'image_text', 'image_audio').")
     parser.add_argument("--fusion_method", type=str, choices=["average", "concat", "cross_attention"], default="average", help="Fusion method to use for combining embeddings.")
     parser.add_argument("--train_json_path", type=str, default='/content/drive/MyDrive/My Data/processed data/train_data.json', help="Path to the training JSON file.")
@@ -254,6 +290,8 @@ if __name__ == "__main__":
     parser.add_argument("--output_dir", type=str, default='/content/drive/MyDrive/My Data', help="Directory to save the model.")
     parser.add_argument("--device", type=str, default="cuda" if torch.cuda.is_available() else "cpu", help="Device to use for training.")
     parser.add_argument("--wandb_project", type=str, help="Weights and Biases project name. If provided, metrics will be logged to WandB.")
+    parser.add_argument("--use_prompt", action="store_true", help="Use the prompt for text input if set; otherwise, use the direct command text.")  # Only for Florence
+    parser.add_argument("--freeze_vision_encoder", action='store_true', help="Whether to freeze the vision encoder during training.")  # Only for Florence
 
     args = parser.parse_args()
 

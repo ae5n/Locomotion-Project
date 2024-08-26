@@ -218,3 +218,19 @@ class FlorenceLocomotionDataset(BaseLocomotionDataset):
         image = self.load_image(entry['id'])
 
         return text_input, label, image
+
+def florence_collate_fn(batch, processor, mode):
+    texts, labels, images = zip(*batch)
+    
+    if mode == 'image_text':
+        inputs = processor(text=list(texts), images=list(images), return_tensors="pt", padding=True, truncation=False)
+    elif mode == 'image_only':
+        if any(texts):  # If there is any text input, include it
+            inputs = processor(text=list(texts), images=list(images), return_tensors="pt", padding=True, truncation=False)
+        else:
+            inputs = processor(images=list(images), return_tensors="pt", padding=True, truncation=False)
+    
+    # Process labels for sequence-to-sequence learning
+    tokenized_labels = processor.tokenizer(list(labels), return_tensors="pt", padding=True, truncation=False)
+    
+    return inputs, tokenized_labels['input_ids']
