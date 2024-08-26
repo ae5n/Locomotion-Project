@@ -12,14 +12,22 @@ from difflib import get_close_matches
 from torch.nn.utils.rnn import pad_sequence
 from data_loader import FlorenceLocomotionDataset  # Assuming this is where the dataset class is defined
 
-def florence_collate_fn(batch, processor):
+def florence_collate_fn(batch, processor, mode):
     texts, labels, images = zip(*batch)
-    inputs = processor(text=list(texts), images=list(images), return_tensors="pt", padding=True, truncation=False)
+    
+    if mode == 'image_text':
+        inputs = processor(text=list(texts), images=list(images), return_tensors="pt", padding=True, truncation=False)
+    elif mode == 'image_only':
+        if any(texts):  # If there is any text input, include it
+            inputs = processor(text=list(texts), images=list(images), return_tensors="pt", padding=True, truncation=False)
+        else:
+            inputs = processor(images=list(images), return_tensors="pt", padding=True, truncation=False)
     
     # Process labels for sequence-to-sequence learning
     tokenized_labels = processor.tokenizer(list(labels), return_tensors="pt", padding=True, truncation=False)
     
     return inputs, tokenized_labels['input_ids']
+
 
 def train_model(args):
     # Load the JSON files
@@ -43,10 +51,10 @@ def train_model(args):
             param.requires_grad = False
 
     # Set up datasets and dataloaders
-    train_dataset = FlorenceLocomotionDataset(train_data, args.image_folder, use_prompt=args.use_prompt)
-    test_dataset = FlorenceLocomotionDataset(test_data, args.image_folder, use_prompt=args.use_prompt)
-    train_loader = DataLoader(train_dataset, batch_size=args.batch_size, shuffle=True, collate_fn=lambda batch: florence_collate_fn(batch, processor))
-    test_loader = DataLoader(test_dataset, batch_size=args.batch_size, shuffle=False, collate_fn=lambda batch: florence_collate_fn(batch, processor))
+    train_dataset = FlorenceLocomotionDataset(train_data, args.image_folder, use_prompt=args.use_prompt, mode=args.mode)
+    test_dataset = FlorenceLocomotionDataset(test_data, args.image_folder, use_prompt=args.use_prompt, mode=args.mode)
+    train_loader = DataLoader(train_dataset, batch_size=args.batch_size, shuffle=True, collate_fn=lambda batch: florence_collate_fn(batch, processor, args.mode))
+    test_loader = DataLoader(test_dataset, batch_size=args.batch_size, shuffle=False, collate_fn=lambda batch: florence_collate_fn(batch, processor, args.mode))
 
     # Set up optimizer, scheduler, and loss function
     optimizer = torch.optim.AdamW(model.parameters(), lr=args.learning_rate)
@@ -128,6 +136,7 @@ if __name__ == "__main__":
 
     # Arguments for configuration
     parser.add_argument("--model_name", type=str, default="microsoft/Florence-2-large", help="Model name to use for fine-tuning.")
+    parser.add_argument("--mode", type=str, default="image_text", help="Mode for the dataset: image_text, image_only, or text_only.")
     parser.add_argument("--train_json_path", type=str, default="train_data.json", help="Path to the training JSON file.")
     parser.add_argument("--test_json_path", type=str, default="test_data.json", help="Path to the test JSON file.")
     parser.add_argument("--image_folder", type=str, default="images/", help="Path to the image folder.")
