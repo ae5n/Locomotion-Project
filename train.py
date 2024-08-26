@@ -66,7 +66,7 @@ def train_model(args):
 
     custom_model.to(args.device) 
 
-    fusion_suffix = f"_{args.fusion_method}" if args.model_name != "vilt-b32-mlm" and args.mode in ["image_text", "image_audio"] else ""
+    fusion_suffix = f"_{args.fusion_method}" if args.model_name not in ["vilt-b32-mlm", "microsoft/Florence-2-large"] and args.mode in ["image_text", "image_audio"] else ""
 
     # Initialize WandB if the project name is provided
     if args.wandb_project:
@@ -78,8 +78,6 @@ def train_model(args):
         total_params = sum(p.numel() for p in custom_model.parameters())
         
         wandb.config.update({
-            "model_name": args.model_name,
-            "mode": args.mode,  # Log the mode (e.g., 'image_only', 'text_only', etc.)
             "trainable_parameters": model_params,  # Log trainable parameters
             "total_parameters": total_params,  # Log total parameters
             "cuda_version": torch.version.cuda,
@@ -174,7 +172,8 @@ def train_model(args):
             model_filename = f'best_{args.model_name.replace("/", "_")}_{args.mode}_{fusion_suffix}_btch{args.batch_size}epch{args.num_epochs}.pth'
             torch.save(custom_model.state_dict(), f'{args.output_dir}/{model_filename}')
             if args.model_name == "microsoft/Florence-2-large":
-                processor.save_pretrained(os.path.join(args.output_dir, f"best_florence_processor_epoch{epoch + 1}.pth"))
+                processor_filename = model_filename.replace('.pth', '_processor.pth')
+                processor.save_pretrained(os.path.join(args.output_dir, processor_filename))
         else:
             trials += 1
             if trials >= args.patience:
@@ -188,7 +187,8 @@ def train_model(args):
         print("Final model is better than or equal to the best model during training. Overwriting the best model.")
         torch.save(custom_model.state_dict(), f'{args.output_dir}/{model_filename}')
         if args.model_name == "microsoft/Florence-2-large":
-            processor.save_pretrained(os.path.join(args.output_dir, "finetuned_florence_processor.pth"))
+            processor_filename = model_filename.replace('.pth', '_processor.pth')
+            processor.save_pretrained(os.path.join(args.output_dir, processor_filename))
     # Evaluate the model after training
     evaluate_model(custom_model, test_dataloader, train_dataset.get_label_map(), args, processor)
 
