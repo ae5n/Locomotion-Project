@@ -2,13 +2,16 @@ import torch
 import argparse
 from torch.utils.data import DataLoader
 from transformers import CLIPProcessor, CLIPModel, ViltProcessor, ViltModel, AutoProcessor, AutoModelForCausalLM
-from sklearn.metrics import accuracy_score, classification_report
+from sklearn.metrics import accuracy_score, classification_report, confusion_matrix
+from sklearn.utils.multiclass import unique_labels
 from torch.optim.lr_scheduler import ReduceLROnPlateau
 import json
 import yaml
 import wandb
 import os
 import pandas as pd
+import seaborn as sns
+import matplotlib.pyplot as plt
 
 from data_loader import CLIPLocomotionDataset, ViLTLocomotionDataset, clip_collate_fn, vilt_collate_fn, FlorenceLocomotionDataset, florence_collate_fn
 from models import CustomCLIPModel, CustomViLTModel
@@ -80,29 +83,12 @@ def train_model(args):
 
     custom_model.to(args.device) 
 
-    fusion_suffix = f"_{getattr(args, 'fusion_method', None)}" if args.model_name not in ["vilt-b32-mlm", "microsoft/Florence-2-large"] and args.mode in ["image_text", "image_audio"] else ""
-
     # Initialize WandB if the project name is provided
     if args.wandb_project:
         wandb.init(project=args.wandb_project)
         
-        # Create a filtered args dictionary for logging
-        filtered_args = vars(args).copy()
-
-        # Remove irrelevant args based on the selected model
-        if args.model_name == "microsoft/Florence-2-large":
-            filtered_args.pop('fusion_method', None)  # Florence doesn't use fusion_method
-            filtered_args['use_prompt'] = getattr(args, 'use_prompt', None)  # Florence uses use_prompt
-            filtered_args['freeze_vision_encoder'] = getattr(args, 'freeze_vision_encoder', None)  # Florence uses freeze_vision_encoder
-        else:
-            filtered_args.pop('use_prompt', None)  # Only Florence uses use_prompt
-            filtered_args.pop('freeze_vision_encoder', None)  # Only Florence uses freeze_vision_encoder
-
-        if args.model_name not in ["clip-vit-large-patch14-336", "imagebind_huge"]:
-            filtered_args.pop('fusion_method', None)  # Only CLIP and ImageBind use fusion_method
-
-        # Save the filtered args to WandB config
-        wandb.config.update(filtered_args)
+        # Log all hyperparameters systematically
+        wandb.config.update(vars(args))
 
         # Calculate and log model parameters once
         model_params = sum(p.numel() for p in custom_model.parameters() if p.requires_grad)
@@ -313,9 +299,13 @@ def evaluate_model(model, dataloader, label_mapping, args, processor):
         'Predicted Label': predicted_labels
     })
 
-    # Log the DataFrame to WandB
+    # Filter out misclassified samples
+    misclassified_df = eval_df[eval_df['True Label'] != eval_df['Predicted Label']]
+
+    # Log both the evaluation DataFrame and the misclassified samples to WandB
     if args.wandb_project:
         wandb.log({"eval_dataframe": wandb.Table(dataframe=eval_df)}) 
+        wandb.log({"misclassified_samples": wandb.Table(dataframe=misclassified_df)})
 
     # Calculate accuracy and print classification report
     accuracy = accuracy_score(true_labels, predicted_labels)
@@ -333,6 +323,31 @@ def evaluate_model(model, dataloader, label_mapping, args, processor):
             "f1_score": report['weighted avg']['f1-score'],
             "classification_report": report
         })
+    # Compute the confusion matrix
+    valid_labels = unique_labels(true_labels, predicted_labels)
+    cm = confusion_matrix(true_labels, predicted_labels, labels=valid_labels)
+
+    # Generate the confusion matrix plot
+    plt.figure(figsize=(20, 16), dpi=300)
+    heatmap = sns.heatmap(cm, annot=True, fmt='d', cmap='Blues', xticklabels=valid_labels, yticklabels=valid_labels,
+                        annot_kws={"size": 13}, cbar_kws={"shrink": 1})
+
+    colorbar = heatmap.collections[0].colorbar
+    colorbar.ax.tick_params(labelsize=14)
+
+    plt.xticks(rotation=45, ha='right', fontsize=14) 
+    plt.yticks(rotation=0, fontsize=13)  
+
+    plt.xlabel('Predicted label', fontsize=15) 
+    plt.ylabel('True label', fontsize=15) 
+    # plt.title('Confusion Matrix', fontsize=16) 
+    plt.tight_layout()
+
+    # Log the plot to WandB
+    if args.wandb_project:
+        wandb.log({"confusion_matrix": wandb.Image(plt)})
+
+    plt.close()
 
 if __name__ == "__main__":
     parser = argparse.ArgumentParser()
