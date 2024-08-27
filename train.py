@@ -5,12 +5,25 @@ from transformers import CLIPProcessor, CLIPModel, ViltProcessor, ViltModel, Aut
 from sklearn.metrics import accuracy_score, classification_report
 from torch.optim.lr_scheduler import ReduceLROnPlateau
 import json
+import yaml
 import wandb
 import os
 import pandas as pd
 
 from data_loader import CLIPLocomotionDataset, ViLTLocomotionDataset, clip_collate_fn, vilt_collate_fn, FlorenceLocomotionDataset, florence_collate_fn
 from models import CustomCLIPModel, CustomViLTModel
+
+def load_config(base_yaml, model_yaml):
+    with open(base_yaml, 'r') as base_file:
+        base_config = yaml.safe_load(base_file)
+    
+    with open(model_yaml, 'r') as model_file:
+        model_config = yaml.safe_load(model_file)
+    
+    # Merge the base config with the model-specific config
+    config = {**base_config, **model_config}
+    
+    return config
 
 def train_model(args):
     # Load the JSON files
@@ -25,7 +38,7 @@ def train_model(args):
         base_model = CLIPModel.from_pretrained("openai/clip-vit-large-patch14-336")
         train_dataset = CLIPLocomotionDataset(train_data, args.image_folder, processor, mode=args.mode)
         test_dataset = CLIPLocomotionDataset(test_data, args.image_folder, processor, mode=args.mode)
-        custom_model = CustomCLIPModel(base_model, len(train_dataset.get_label_map()), mode=args.mode, fusion_method=args.fusion_method)
+        custom_model = CustomCLIPModel(base_model, len(train_dataset.get_label_map()), mode=args.mode, fusion_method=getattr(args, 'fusion_method', None))
         collate_fn = lambda x: clip_collate_fn(x, mode=args.mode)
 
     elif args.model_name == "vilt-b32-mlm":
@@ -43,19 +56,19 @@ def train_model(args):
         base_model = imagebind_model.imagebind_huge(pretrained=True)
         train_dataset = ImageBindLocomotionDataset(train_data, args.image_folder, args.audio_folder, mode=args.mode, device=args.device)
         test_dataset = ImageBindLocomotionDataset(test_data, args.image_folder, args.audio_folder, mode=args.mode, device=args.device)
-        custom_model = CustomImageBindModel(base_model, len(train_dataset.get_label_map()), mode=args.mode, fusion_method=args.fusion_method)
+        custom_model = CustomImageBindModel(base_model, len(train_dataset.get_label_map()), mode=args.mode, fusion_method=getattr(args, 'fusion_method', None))
         collate_fn = None  # ImageBind doesn't require a special collate function
     
     elif args.model_name == "microsoft/Florence-2-large":
         processor = AutoProcessor.from_pretrained(args.model_name, trust_remote_code=True)
         base_model = AutoModelForCausalLM.from_pretrained(args.model_name, trust_remote_code=True)
-        train_dataset = FlorenceLocomotionDataset(train_data, args.image_folder, use_prompt=args.use_prompt, mode=args.mode)
-        test_dataset = FlorenceLocomotionDataset(test_data, args.image_folder, use_prompt=args.use_prompt, mode=args.mode)
+        train_dataset = FlorenceLocomotionDataset(train_data, args.image_folder, use_prompt=getattr(args, 'use_prompt', None), mode=args.mode)
+        test_dataset = FlorenceLocomotionDataset(test_data, args.image_folder, use_prompt=getattr(args, 'use_prompt', None), mode=args.mode)
         collate_fn = lambda x: florence_collate_fn(x, processor, mode=args.mode)
         custom_model = base_model  # Use the base model directly for Florence-2
 
         # Optionally freeze the vision encoder
-        if args.freeze_vision_encoder:
+        if getattr(args, 'freeze_vision_encoder', None):
             for param in custom_model.vision_tower.parameters():
                 param.requires_grad = False
 
@@ -67,7 +80,7 @@ def train_model(args):
 
     custom_model.to(args.device) 
 
-    fusion_suffix = f"_{args.fusion_method}" if args.model_name not in ["vilt-b32-mlm", "microsoft/Florence-2-large"] and args.mode in ["image_text", "image_audio"] else ""
+    fusion_suffix = f"_{getattr(args, 'fusion_method', None)}" if args.model_name not in ["vilt-b32-mlm", "microsoft/Florence-2-large"] and args.mode in ["image_text", "image_audio"] else ""
 
     # Initialize WandB if the project name is provided
     if args.wandb_project:
@@ -79,8 +92,8 @@ def train_model(args):
         # Remove irrelevant args based on the selected model
         if args.model_name == "microsoft/Florence-2-large":
             filtered_args.pop('fusion_method', None)  # Florence doesn't use fusion_method
-            filtered_args['use_prompt'] = args.use_prompt  # Florence uses use_prompt
-            filtered_args['freeze_vision_encoder'] = args.freeze_vision_encoder  # Florence uses freeze_vision_encoder
+            filtered_args['use_prompt'] = getattr(args, 'use_prompt', None)  # Florence uses use_prompt
+            filtered_args['freeze_vision_encoder'] = getattr(args, 'freeze_vision_encoder', None)  # Florence uses freeze_vision_encoder
         else:
             filtered_args.pop('use_prompt', None)  # Only Florence uses use_prompt
             filtered_args.pop('freeze_vision_encoder', None)  # Only Florence uses freeze_vision_encoder
@@ -306,25 +319,14 @@ def evaluate_model(model, dataloader, label_mapping, args, processor):
 if __name__ == "__main__":
     parser = argparse.ArgumentParser()
 
-    # Add arguments for configuration
-    parser.add_argument("model_name", type=str, choices=["clip-vit-large-patch14-336", "vilt-b32-mlm", "imagebind_huge", "microsoft/Florence-2-large"], help="Model name to use (e.g., 'clip-vit-large-patch14-336', 'vilt-b32-mlm', 'imagebind_huge', 'microsoft/Florence-2-large').")
-    parser.add_argument("mode", type=str, choices=["image_only", "text_only", "image_text", "image_audio", "audio_only"], help="Mode of training (e.g., 'image_only', 'text_only', 'image_text', 'image_audio').")
-    parser.add_argument("--fusion_method", type=str, choices=["average", "concat", "cross_attention"], default="average", help="Fusion method to use for combining embeddings.")
-    parser.add_argument("--train_json_path", type=str, default='/content/drive/MyDrive/My Data/processed data/train_data.json', help="Path to the training JSON file.")
-    parser.add_argument("--test_json_path", type=str, default='/content/drive/MyDrive/My Data/processed data/test_data.json', help="Path to the test JSON file.")
-    parser.add_argument("--image_folder", type=str, default='/content/drive/MyDrive/My Data/processed data/images', help="Path to the image folder.")
-    parser.add_argument("--audio_folder", type=str, default='/content/drive/MyDrive/My Data/processed data/audio', help="Path to the audio folder (only required for ImageBind).")
-    parser.add_argument("--batch_size", type=int, default=8, help="Batch size for training.")
-    parser.add_argument("--learning_rate", type=float, default=1e-4, help="Learning rate.")
-    parser.add_argument("--num_epochs", type=int, default=22, help="Number of epochs for training.")
-    parser.add_argument("--patience", type=int, default=5, help="Patience for early stopping.")
-    parser.add_argument("--output_dir", type=str, default='/content/drive/MyDrive/My Data', help="Directory to save the model.")
-    parser.add_argument("--device", type=str, default="cuda" if torch.cuda.is_available() else "cpu", help="Device to use for training.")
-    parser.add_argument("--wandb_project", type=str, help="Weights and Biases project name. If provided, metrics will be logged to WandB.")
-    parser.add_argument("--use_prompt", action="store_true", help="Use the prompt for text input if set; otherwise, use the direct command text.")  # Only for Florence
-    parser.add_argument("--freeze_vision_encoder", action='store_true', help="Whether to freeze the vision encoder during training.")  # Only for Florence
+    # Add arguments for base config and model-specific config
+    parser.add_argument("base_config", type=str, help="Path to the base configuration YAML file.")
+    parser.add_argument("model_config", type=str, help="Path to the model-specific configuration YAML file.")
 
     args = parser.parse_args()
 
-    # Train and test the model with the provided arguments
-    train_model(args)
+    # Load the configuration from the YAML files
+    config = load_config(args.base_config, args.model_config)
+
+    # Train and test the model with the provided configuration
+    train_model(argparse.Namespace(**config))
