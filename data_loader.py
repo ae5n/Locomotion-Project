@@ -60,41 +60,42 @@ class CLIPLocomotionDataset(BaseLocomotionDataset):
         inputs = {}
         if self.mode == 'image_only':
             inputs = self.processor(images=image, return_tensors="pt", padding=True)
-            return inputs['pixel_values'][0], self.label_map[label]
+            return image_id, inputs['pixel_values'][0], self.label_map[label]
         elif self.mode == 'text_only':
             inputs = self.processor(text=text, return_tensors="pt", padding=True)
-            return inputs['input_ids'][0], inputs['attention_mask'][0], self.label_map[label]
+            return image_id, inputs['input_ids'][0], inputs['attention_mask'][0], self.label_map[label]
         elif self.mode == 'image_text':
             inputs = self.processor(text=text, images=image, return_tensors="pt", padding=True)
-            return inputs['pixel_values'][0], inputs['input_ids'][0], inputs['attention_mask'][0], self.label_map[label]
+            return image_id, inputs['pixel_values'][0], inputs['input_ids'][0], inputs['attention_mask'][0], self.label_map[label]
 
 def clip_collate_fn(batch, mode='image_text'):
     """
     Function to collate data into batches and pad sequences.
     """
     batch = [item for item in batch if item is not None]
-    
+    ids = [item[0] for item in batch]
+
     if mode == 'image_only':
-        pixel_values = torch.stack([item[0] for item in batch])
-        labels = [item[1] for item in batch]
-        return pixel_values, None, None, labels
+        pixel_values = torch.stack([item[1] for item in batch])
+        labels = [item[2] for item in batch]
+        return ids, pixel_values, None, None, labels
     
     elif mode == 'text_only':
-        input_ids = [item[0] for item in batch]
-        attention_masks = [item[1] for item in batch]
-        labels = [item[2] for item in batch]
-        input_ids_padded = torch.nn.utils.rnn.pad_sequence(input_ids, batch_first=True, padding_value=0)
-        attention_masks_padded = torch.nn.utils.rnn.pad_sequence(attention_masks, batch_first=True, padding_value=0)
-        return None, input_ids_padded, attention_masks_padded, labels
-    
-    elif mode == 'image_text':
-        pixel_values = torch.stack([item[0] for item in batch])
         input_ids = [item[1] for item in batch]
         attention_masks = [item[2] for item in batch]
         labels = [item[3] for item in batch]
         input_ids_padded = torch.nn.utils.rnn.pad_sequence(input_ids, batch_first=True, padding_value=0)
         attention_masks_padded = torch.nn.utils.rnn.pad_sequence(attention_masks, batch_first=True, padding_value=0)
-        return pixel_values, input_ids_padded, attention_masks_padded, labels
+        return ids, None, input_ids_padded, attention_masks_padded, labels
+    
+    elif mode == 'image_text':
+        pixel_values = torch.stack([item[1] for item in batch])
+        input_ids = [item[2] for item in batch]
+        attention_masks = [item[3] for item in batch]
+        labels = [item[4] for item in batch]
+        input_ids_padded = torch.nn.utils.rnn.pad_sequence(input_ids, batch_first=True, padding_value=0)
+        attention_masks_padded = torch.nn.utils.rnn.pad_sequence(attention_masks, batch_first=True, padding_value=0)
+        return ids, pixel_values, input_ids_padded, attention_masks_padded, labels
 
 class ViLTLocomotionDataset(BaseLocomotionDataset):
     def __init__(self, data, image_folder, processor):
@@ -116,20 +117,21 @@ class ViLTLocomotionDataset(BaseLocomotionDataset):
         image = self.load_image(image_id)
 
         inputs = self.processor(text=text, images=image, return_tensors="pt", padding=True)
-        return inputs['pixel_values'][0], inputs['input_ids'][0], inputs['attention_mask'][0], self.label_map[label]
+        return image_id, inputs['pixel_values'][0], inputs['input_ids'][0], inputs['attention_mask'][0], self.label_map[label]
 
 def vilt_collate_fn(batch):
     """
     Function to collate data into batches for ViLT.
     """
     batch = [item for item in batch if item is not None]
-    pixel_values = torch.stack([item[0] for item in batch])
-    input_ids = [item[1] for item in batch]
-    attention_masks = [item[2] for item in batch]
-    labels = [item[3] for item in batch]
+    ids = [item[0] for item in batch]
+    pixel_values = torch.stack([item[1] for item in batch])
+    input_ids = [item[2] for item in batch]
+    attention_masks = [item[3] for item in batch]
+    labels = [item[4] for item in batch]
     input_ids_padded = torch.nn.utils.rnn.pad_sequence(input_ids, batch_first=True, padding_value=0)
     attention_masks_padded = torch.nn.utils.rnn.pad_sequence(attention_masks, batch_first=True, padding_value=0)
-    return pixel_values, input_ids_padded, attention_masks_padded, labels
+    return ids, pixel_values, input_ids_padded, attention_masks_padded, labels
 
 class ImageBindLocomotionDataset(BaseLocomotionDataset):
     def __init__(self, data, image_folder, audio_folder=None, mode='image_text', device='cpu'):
@@ -172,7 +174,7 @@ class ImageBindLocomotionDataset(BaseLocomotionDataset):
         label = self.label_map[entry['label']]
         label_tensor = torch.tensor(label, dtype=torch.long)
 
-        return inputs, label_tensor
+        return entry['id'], inputs, label_tensor
 
     def __len__(self):
         return len(self.data)
@@ -217,10 +219,11 @@ class FlorenceLocomotionDataset(BaseLocomotionDataset):
         label = entry['label']
         image = self.load_image(entry['id'])
 
-        return text_input, label, image
+        return entry['id'], text_input, label, image
 
 def florence_collate_fn(batch, processor, mode):
-    texts, labels, images = zip(*batch)
+    ids = [item[0] for item in batch]
+    texts, labels, images = zip(*[(item[1], item[2], item[3]) for item in batch])
     
     if mode == 'image_text':
         inputs = processor(text=list(texts), images=list(images), return_tensors="pt", padding=True, truncation=False)
@@ -233,4 +236,4 @@ def florence_collate_fn(batch, processor, mode):
     # Process labels for sequence-to-sequence learning
     tokenized_labels = processor.tokenizer(list(labels), return_tensors="pt", padding=True, truncation=False)
     
-    return inputs, tokenized_labels['input_ids']
+    return ids, inputs, tokenized_labels['input_ids']

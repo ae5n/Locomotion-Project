@@ -7,6 +7,7 @@ from torch.optim.lr_scheduler import ReduceLROnPlateau
 import json
 import wandb
 import os
+import pandas as pd
 
 from data_loader import CLIPLocomotionDataset, ViLTLocomotionDataset, clip_collate_fn, vilt_collate_fn, FlorenceLocomotionDataset, florence_collate_fn
 from models import CustomCLIPModel, CustomViLTModel
@@ -103,7 +104,7 @@ def train_model(args):
 
         for batch in train_dataloader:
             if args.model_name == "clip-vit-large-patch14-336":
-                images, input_ids, attention_mask, labels = batch
+                ids, images, input_ids, attention_mask, labels = batch
                 if args.mode == "image_only":
                     images = images.to(args.device)
                     logits = custom_model(pixel_values=images)
@@ -117,19 +118,19 @@ def train_model(args):
                     attention_mask = attention_mask.to(args.device)
                     logits = custom_model(pixel_values=images, input_ids=input_ids, attention_mask=attention_mask)
             elif args.model_name == "vilt-b32-mlm":
-                images, input_ids, attention_mask, labels = batch
+                ids, images, input_ids, attention_mask, labels = batch
                 images = images.to(args.device)
                 input_ids = input_ids.to(args.device)
                 attention_mask = attention_mask.to(args.device)
                 logits, _ = custom_model(pixel_values=images, input_ids=input_ids, attention_mask=attention_mask)
 
             elif args.model_name == "imagebind_huge":
-                inputs, labels = batch
+                ids, inputs, labels = batch
                 inputs = {k: v.to(args.device) for k, v in inputs.items()}
                 logits = custom_model(inputs)
             
             elif args.model_name == "microsoft/Florence-2-large":
-                inputs, labels = batch
+                ids, inputs, labels = batch
                 inputs = {k: v.to(args.device) for k, v in inputs.items()}
                 outputs = custom_model(**inputs, labels=labels.to(args.device))
                 loss = outputs.loss
@@ -196,6 +197,7 @@ def evaluate_model(model, dataloader, label_mapping, args, processor):
     model.eval()
     true_labels = []
     predicted_labels = []
+    ids_list = []
 
     # Reverse the label map for lookup
     inverse_label_map = {v: k for k, v in label_mapping.items()}
@@ -203,7 +205,7 @@ def evaluate_model(model, dataloader, label_mapping, args, processor):
     with torch.no_grad():
         for batch in dataloader:
             if args.model_name == "clip-vit-large-patch14-336":
-                images, input_ids, attention_mask, labels = batch
+                ids, images, input_ids, attention_mask, labels = batch
                 if args.mode == "image_only":
                     images = images.to(args.device)
                     logits = model(pixel_values=images)
@@ -218,20 +220,20 @@ def evaluate_model(model, dataloader, label_mapping, args, processor):
                     logits = model(pixel_values=images, input_ids=input_ids, attention_mask=attention_mask)
 
             elif args.model_name == "vilt-b32-mlm":
-                images, input_ids, attention_mask, labels = batch
+                ids, images, input_ids, attention_mask, labels = batch
                 images = images.to(args.device)
                 input_ids = input_ids.to(args.device)
                 attention_mask = attention_mask.to(args.device)
                 logits, _ = model(pixel_values=images, input_ids=input_ids, attention_mask=attention_mask)
 
             elif args.model_name == "imagebind_huge":
-                inputs, labels = batch
+                ids, inputs, labels = batch
                 inputs = {k: v.to(args.device) for k, v in inputs.items()}
                 logits = model(inputs)
                 labels = labels.cpu().tolist()  # Convert to list of indices for ImageBind
             
             elif args.model_name == "microsoft/Florence-2-large":
-                inputs, labels = batch
+                ids, inputs, labels = batch
                 inputs = {k: v.to(args.device) for k, v in inputs.items()}
                 generated_ids = model.generate(input_ids=inputs['input_ids'], pixel_values=inputs['pixel_values'], max_new_tokens=50)
                 generated_text = processor.batch_decode(generated_ids, skip_special_tokens=True)
@@ -239,6 +241,7 @@ def evaluate_model(model, dataloader, label_mapping, args, processor):
                 print(f"Generated text: {generated_text}, True label: {true_text}")
                 predicted_labels.extend(generated_text)
                 true_labels.extend(true_text)
+                ids_list.extend(ids)
             
             if args.model_name != "microsoft/Florence-2-large":
                 preds = torch.argmax(logits, dim=1)
@@ -248,12 +251,23 @@ def evaluate_model(model, dataloader, label_mapping, args, processor):
                     true_labels.extend(labels)
 
                 predicted_labels.extend(preds.cpu().numpy())
+                ids_list.extend(ids)
 
     # Convert indices to labels using the inverse label map
     if args.model_name != "microsoft/Florence-2-large":
         true_labels = [inverse_label_map[label] for label in true_labels]
         predicted_labels = [inverse_label_map[label] for label in predicted_labels]
 
+    # Create a DataFrame with ID, true labels, and predicted labels
+    eval_df = pd.DataFrame({
+        'ID': ids_list,
+        'True Label': true_labels,
+        'Predicted Label': predicted_labels
+    })
+
+    # Log the DataFrame to WandB
+    if args.wandb_project:
+        wandb.log({"eval_dataframe": wandb.Table(dataframe=eval_df)}) 
 
     # Calculate accuracy and print classification report
     accuracy = accuracy_score(true_labels, predicted_labels)
