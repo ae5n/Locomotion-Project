@@ -72,8 +72,25 @@ def train_model(args):
     # Initialize WandB if the project name is provided
     if args.wandb_project:
         wandb.init(project=args.wandb_project)
-        wandb.config.update(args)  # Save the args to WandB config
-    
+        
+        # Create a filtered args dictionary for logging
+        filtered_args = vars(args).copy()
+
+        # Remove irrelevant args based on the selected model
+        if args.model_name == "microsoft/Florence-2-large":
+            filtered_args.pop('fusion_method', None)  # Florence doesn't use fusion_method
+            filtered_args['use_prompt'] = args.use_prompt  # Florence uses use_prompt
+            filtered_args['freeze_vision_encoder'] = args.freeze_vision_encoder  # Florence uses freeze_vision_encoder
+        else:
+            filtered_args.pop('use_prompt', None)  # Only Florence uses use_prompt
+            filtered_args.pop('freeze_vision_encoder', None)  # Only Florence uses freeze_vision_encoder
+
+        if args.model_name not in ["clip-vit-large-patch14-336", "imagebind_huge"]:
+            filtered_args.pop('fusion_method', None)  # Only CLIP and ImageBind use fusion_method
+
+        # Save the filtered args to WandB config
+        wandb.config.update(filtered_args)
+
         # Calculate and log model parameters once
         model_params = sum(p.numel() for p in custom_model.parameters() if p.requires_grad)
         total_params = sum(p.numel() for p in custom_model.parameters())
