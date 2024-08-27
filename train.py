@@ -128,6 +128,12 @@ def train_model(args):
     best_loss = float('inf')
     trials = 0
 
+    model_folder_name = args.model_name.replace("/", "_")  # Replace '/' with '_' for the folder name
+    experiment_dir = os.path.join(args.output_dir, model_folder_name, os.path.splitext(os.path.basename(args.model_config))[0])
+    os.makedirs(experiment_dir, exist_ok=True)
+
+    best_model_state = None  # Initialize best_model_state
+
     for epoch in range(args.num_epochs):
         custom_model.train()
         train_loss = 0.0
@@ -195,31 +201,43 @@ def train_model(args):
         # Learning rate scheduling
         scheduler.step(train_loss)
 
-        # Early stopping
+        # Early stopping and best model tracking
         if train_loss < best_loss:
             best_loss = train_loss
             trials = 0
-            # Save the model when it achieves the best loss
-            model_filename = f'best_{args.model_name.replace("/", "_")}_{args.mode}_{fusion_suffix}_btch{args.batch_size}epch{args.num_epochs}.pth'
-            torch.save(custom_model.state_dict(), f'{args.output_dir}/{model_filename}')
+            best_model_state = custom_model.state_dict()  # Save the best model state in memory
+            best_model_filename = os.path.join(experiment_dir, 'best_model.pth')
+            torch.save(best_model_state, best_model_filename)
             if args.model_name == "microsoft/Florence-2-large":
-                processor_filename = model_filename.replace('.pth', '_processor.pth')
-                processor.save_pretrained(os.path.join(args.output_dir, processor_filename))
+                processor_dir = os.path.join(experiment_dir, 'florence_processor')
+                processor.save_pretrained(processor_dir)
         else:
             trials += 1
             if trials >= args.patience:
                 print(f"Early stopping on epoch {epoch+1}")
                 break
-    
-    final_loss = train_loss
 
-    # If the final model is better than the saved best model, overwrite it
-    if final_loss <= best_loss:
-        print("Final model is better than or equal to the best model during training. Overwriting the best model.")
-        torch.save(custom_model.state_dict(), f'{args.output_dir}/{model_filename}')
+    # At the end of training, check if the final model is better than the best model and save it if necessary
+    final_loss = train_loss
+    if final_loss < best_loss:
+        print("Final model is better than the previously saved best model. Overwriting the best model.")
+        best_model_state = custom_model.state_dict()  # Save the final model state
+        best_model_filename = os.path.join(experiment_dir, 'best_model.pth')
+        torch.save(custom_model.state_dict(), best_model_filename)
         if args.model_name == "microsoft/Florence-2-large":
-            processor_filename = model_filename.replace('.pth', '_processor.pth')
-            processor.save_pretrained(os.path.join(args.output_dir, processor_filename))
+            processor_dir = os.path.join(experiment_dir, 'florence_processor')
+            processor.save_pretrained(processor_dir)
+    else:
+        # Ensure the final model is set to the best model
+        if best_model_state is not None:
+            custom_model.load_state_dict(best_model_state)
+            print("Final model is set to the best model during training.")
+
+    # Save the model-specific configuration file in the same folder with the original name
+    config_filename = os.path.join(experiment_dir, os.path.basename(args.model_config))
+    with open(config_filename, 'w') as config_file:
+        yaml.dump(vars(args), config_file)
+
     # Evaluate the model after training
     evaluate_model(custom_model, test_dataloader, train_dataset.get_label_map(), args, processor)
 
@@ -327,6 +345,9 @@ if __name__ == "__main__":
 
     # Load the configuration from the YAML files
     config = load_config(args.base_config, args.model_config)
-
+    
+    # Add the model_config attribute to the config dictionary
+    config['model_config'] = args.model_config
+    
     # Train and test the model with the provided configuration
     train_model(argparse.Namespace(**config))
