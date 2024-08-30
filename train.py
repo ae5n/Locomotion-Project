@@ -90,11 +90,9 @@ def train_model(args):
 
     custom_model.to(args.device) 
 
-    # Initialize WandB if the project name is provided
+    # Log to WandB if the project name is provided
     if args.wandb_project:
-        wandb.init(project=args.wandb_project)
-        
-        # Log all hyperparameters systematically
+
         wandb.config.update(vars(args))
 
         # Calculate and log model parameters once
@@ -400,5 +398,10 @@ if __name__ == "__main__":
     # Add the model_config attribute to the config dictionary
     config['model_config'] = args.model_config
     
+    # Initialize WandB 
+    if config.get('wandb_project', None):
+        wandb.init(project=config['wandb_project'])
+        wandb.config.update(config)
+
     # Train and test the model with the provided configuration
     train_model(argparse.Namespace(**config))
