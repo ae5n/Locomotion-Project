@@ -4,4 +4,4 @@ image_folder: '/content/drive/MyDrive/Colab Notebooks/Locomotion/Data/images'
 audio_folder: '/content/drive/MyDrive/Colab Notebooks/Locomotion/Data/audios'
 output_dir: '/content/drive/MyDrive/Colab Notebooks/Locomotion/Trained'
 device: cuda
-wandb_project: locomotion-test
+wandb_project: locomotion-project
