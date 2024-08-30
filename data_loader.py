@@ -3,6 +3,8 @@ import json
 import torch
 from PIL import Image
 from torch.utils.data import Dataset
+import base64
+
 
 class BaseLocomotionDataset(Dataset):
     def __init__(self, data, image_folder):
@@ -197,7 +199,7 @@ class FlorenceLocomotionDataset(BaseLocomotionDataset):
                     "in an industrial environment. The frames capture the user’s perspective from 3 seconds before to 2 seconds after the activity begins. "
                     "Along with the frames, the user gives the following command: \"{}\". Analyze both the image and the command to identify the locomotion activity. "
                     "Choose the most accurate category: Vertical Ladder Up Climbing, Vertical Ladder Down Climbing, Construction Ladder Up Climbing, Construction Ladder Down Climbing, "
-                    "Level-ground Navigation, Stair Ascension, Stair Descension, Stepping over Box, Stepping over Pipe, Low Space Navigation, Sitting Activity, Standing Activity, or None if no match is found. "
+                    "Level-ground Navigation, Stair Ascension, Stair Descension, Stepping over Box, Stepping over Pipe, Low Space Navigation, Sitting, Standing, or None if no match is found. "
                     "Respond with the exact category name only, without any explanations."
                 ).format(entry['text'])
             else:
@@ -209,7 +211,7 @@ class FlorenceLocomotionDataset(BaseLocomotionDataset):
                     "in an industrial environment. The frames capture the user’s perspective from 3 seconds before to 2 seconds after the activity begins. "
                     "Analyze the image to identify the locomotion activity. "
                     "Choose the most accurate category: Vertical Ladder Up Climbing, Vertical Ladder Down Climbing, Construction Ladder Up Climbing, Construction Ladder Down Climbing, "
-                    "Level-ground Navigation, Stair Ascension, Stair Descension, Stepping over Box, Stepping over Pipe, Low Space Navigation, Sitting Activity, Standing Activity, or None if no match is found. "
+                    "Level-ground Navigation, Stair Ascension, Stair Descension, Stepping over Box, Stepping over Pipe, Low Space Navigation, Sitting, Standing, or None if no match is found. "
                     "Respond with the exact category name only, without any explanations."
                 )
             else:
@@ -237,3 +239,65 @@ def florence_collate_fn(batch, processor, mode):
     tokenized_labels = processor.tokenizer(list(labels), return_tensors="pt", padding=True, truncation=False)
     
     return ids, inputs, tokenized_labels['input_ids']
+
+class GPT4LocomotionDataset(BaseLocomotionDataset):
+    def __init__(self, data, image_folder, mode='image_text'):
+        """
+        GPT-4-specific dataset class supporting image-only, text-only, and image-and-text modes.
+        """
+        super().__init__(data, image_folder)
+        self.mode = mode
+
+    def encode_image(self, image_path):
+        """
+        Encode an image file to a base64 string.
+        """
+        with open(image_path, "rb") as image_file:
+            return base64.b64encode(image_file.read()).decode("utf-8")
+
+    def __getitem__(self, idx):
+        """
+        Get a sample from the dataset for GPT-4 model based on the mode.
+        """
+        entry = self.data[idx]
+        image_id = entry['id']
+        text = entry['text']
+        label = entry['label']
+
+        encoded_image = 0
+
+        if self.mode == 'image_only':
+            prompt = (
+                "You are provided with an image containing 9 field-of-view (FOV) frames from smart glasses worn by a user performing a locomotion activity "
+                "in an industrial environment. The frames capture the user’s perspective from 3 seconds before to 2 seconds after the activity begins. "
+                "Analyze the image to identify the locomotion activity. "
+                "Choose the most accurate category: Vertical Ladder Up Climbing, Vertical Ladder Down Climbing, Construction Ladder Up Climbing, Construction Ladder Down Climbing, "
+                "Level-ground Navigation, Stair Ascension, Stair Descension, Stepping over Box, Stepping over Pipe, Low Space Navigation, Sitting, Standing, or None if no match is found. "
+                "Respond with the exact category name only, without any explanations."
+            )
+            image_path = os.path.join(self.image_folder, f"{image_id}.jpg")
+            encoded_image = self.encode_image(image_path)
+        
+        elif self.mode == 'text_only':
+            prompt = (
+                "You are provided with a command from a user describing their locomotion activity in an industrial environment. "
+                "The command is as follows: \"{}\". "
+                "Analyze this command to identify the locomotion activity. "
+                "Choose the most accurate category: Vertical Ladder Up Climbing, Vertical Ladder Down Climbing, Construction Ladder Up Climbing, Construction Ladder Down Climbing, "
+                "Level-ground Navigation, Stair Ascension, Stair Descension, Stepping over Box, Stepping over Pipe, Low Space Navigation, Sitting, Standing, or None if no match is found. "
+                "Respond with the exact category name only, without any explanations."
+            ).format(text)
+
+        elif self.mode == 'image_text':
+            prompt = (
+                "You are provided with an image containing 9 field-of-view (FOV) frames from smart glasses worn by a user performing a locomotion activity "
+                "in an industrial environment. The frames capture the user’s perspective from 3 seconds before to 2 seconds after the activity begins. "
+                "Along with the frames, the user gives the following command: \"{}\". Analyze both the image and the command to identify the locomotion activity. "
+                "Choose the most accurate category: Vertical Ladder Up Climbing, Vertical Ladder Down Climbing, Construction Ladder Up Climbing, Construction Ladder Down Climbing, "
+                "Level-ground Navigation, Stair Ascension, Stair Descension, Stepping over Box, Stepping over Pipe, Low Space Navigation, Sitting, Standing, or None if no match is found. "
+                "Respond with the exact category name only, without any explanations."
+            ).format(text)
+            image_path = os.path.join(self.image_folder, f"{image_id}.jpg")
+            encoded_image = self.encode_image(image_path)
+
+        return image_id, prompt, encoded_image, label

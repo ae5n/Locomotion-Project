@@ -2,6 +2,7 @@ import torch
 import argparse
 from torch.utils.data import DataLoader
 from transformers import CLIPProcessor, CLIPModel, ViltProcessor, ViltModel, AutoProcessor, AutoModelForCausalLM
+import openai
 from sklearn.metrics import accuracy_score, classification_report, confusion_matrix
 from sklearn.utils.multiclass import unique_labels
 from torch.optim.lr_scheduler import ReduceLROnPlateau
@@ -13,7 +14,7 @@ import pandas as pd
 import seaborn as sns
 import matplotlib.pyplot as plt
 
-from data_loader import CLIPLocomotionDataset, ViLTLocomotionDataset, clip_collate_fn, vilt_collate_fn, FlorenceLocomotionDataset, florence_collate_fn
+from data_loader import CLIPLocomotionDataset, ViLTLocomotionDataset, FlorenceLocomotionDataset, GPT4LocomotionDataset, clip_collate_fn, vilt_collate_fn, florence_collate_fn
 from models import CustomCLIPModel, CustomViLTModel
 
 def load_config(base_yaml, model_yaml):
@@ -74,6 +75,12 @@ def train_model(args):
         if getattr(args, 'freeze_vision_encoder', None):
             for param in custom_model.vision_tower.parameters():
                 param.requires_grad = False
+
+    elif args.model_name == "gpt-4o":
+        test_dataset = GPT4LocomotionDataset(test_data, args.image_folder, mode=args.mode)
+        test_dataloader = DataLoader(test_dataset, batch_size=1, shuffle=True)
+        evaluate_model(None, test_dataloader, test_dataset.get_label_map(), args=args, processor=None)
+        return
 
     else:
         raise ValueError(f"Unsupported model name: {args.model_name}")
@@ -228,7 +235,8 @@ def train_model(args):
     evaluate_model(custom_model, test_dataloader, train_dataset.get_label_map(), args, processor)
 
 def evaluate_model(model, dataloader, label_mapping, args, processor):
-    model.eval()
+    if args.model_name != "gpt-4o":
+        model.eval()
     true_labels = []
     predicted_labels = []
     ids_list = []
@@ -272,12 +280,40 @@ def evaluate_model(model, dataloader, label_mapping, args, processor):
                 generated_ids = model.generate(input_ids=inputs['input_ids'], pixel_values=inputs['pixel_values'], max_new_tokens=50)
                 generated_text = processor.batch_decode(generated_ids, skip_special_tokens=True)
                 true_text = processor.batch_decode(labels, skip_special_tokens=True)
-                print(f"Generated text: {generated_text}, True label: {true_text}")
                 predicted_labels.extend(generated_text)
                 true_labels.extend(true_text)
                 ids_list.extend(ids)
-            
-            if args.model_name != "microsoft/Florence-2-large":
+
+            elif args.model_name == "gpt-4o":
+                client = openai.OpenAI(api_key=os.getenv("OPENAI_API_KEY"))
+                ids, prompts, encoded_images, labels = batch
+                for i in range(len(ids)):
+                    # Construct the message based on the mode
+                    if args.mode in ['image_only', 'image_text']:
+                        message = [
+                                {"role": "system", "content": "You are an AI specialized in a classification task."},
+                                {"role": "user", "content": [
+                                    {"type": "text", "text": prompts[i]},
+                                    {"type": "image_url", "image_url": {
+                                        "url": f"data:image/png;base64,{encoded_images[i]}"}
+                                    }
+                                ]}
+                            ]
+                    elif args.mode == 'text_only':
+                        message = [ 
+                            {"role": "system", "content": "You are an AI specialized in a classification task."}, 
+                            {"role": "user", "content": prompts[i]}]
+                    response = client.chat.completions.create(
+                        model="gpt-4o",
+                        messages=message
+                    )
+                    predicted_label = response.choices[0].message.content.strip()
+                    # Extend lists with predictions and true labels
+                    predicted_labels.append(predicted_label)
+                    true_labels.append(labels[i])
+                    ids_list.append(ids[i]) 
+
+            if args.model_name not in ["microsoft/Florence-2-large", "gpt-4o"]:
                 preds = torch.argmax(logits, dim=1)
                 if isinstance(labels, torch.Tensor):  # Handle labels for ImageBind
                     true_labels.extend(labels.cpu().tolist())
@@ -288,7 +324,7 @@ def evaluate_model(model, dataloader, label_mapping, args, processor):
                 ids_list.extend(ids)
 
     # Convert indices to labels using the inverse label map
-    if args.model_name != "microsoft/Florence-2-large":
+    if args.model_name not in ["microsoft/Florence-2-large", "gpt-4o"]:
         true_labels = [inverse_label_map[label] for label in true_labels]
         predicted_labels = [inverse_label_map[label] for label in predicted_labels]
 
