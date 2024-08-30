@@ -2,12 +2,12 @@ import torch
 import argparse
 from torch.utils.data import DataLoader
 from transformers import CLIPProcessor, CLIPModel, ViltProcessor, ViltModel, AutoProcessor, AutoModelForCausalLM
-import openai
 from sklearn.metrics import accuracy_score, classification_report, confusion_matrix
 from sklearn.utils.multiclass import unique_labels
 from torch.optim.lr_scheduler import ReduceLROnPlateau
 import json
 import yaml
+import logging
 import wandb
 import os
 import pandas as pd
@@ -16,6 +16,10 @@ import matplotlib.pyplot as plt
 
 from data_loader import CLIPLocomotionDataset, ViLTLocomotionDataset, FlorenceLocomotionDataset, GPT4LocomotionDataset, clip_collate_fn, vilt_collate_fn, florence_collate_fn
 from models import CustomCLIPModel, CustomViLTModel
+
+# Set up logging configuration
+logging.basicConfig(level=logging.INFO)
+logger = logging.getLogger(__name__)
 
 def load_config(base_yaml, model_yaml):
     with open(base_yaml, 'r') as base_file:
@@ -29,7 +33,15 @@ def load_config(base_yaml, model_yaml):
     
     return config
 
-def train_model(args):
+def train_model(args): 
+    # Filter out paths that you don't want to log
+    filtered_args = {k: v for k, v in vars(args).items() if k not in ['train_json_path', 'test_json_path', 'image_folder', 'audio_folder', 'output_dir']}
+ 
+    # Log each argument on a separate line
+    logger.info("Training/evaluating model with the following arguments:")
+    for key, value in filtered_args.items():
+        logger.info(f"{key}: {value}")
+
     # Load the JSON files
     with open(args.train_json_path, 'r') as f:
         train_data = json.load(f)
@@ -77,6 +89,7 @@ def train_model(args):
                 param.requires_grad = False
 
     elif args.model_name == "gpt-4o":
+        import openai
         test_dataset = GPT4LocomotionDataset(test_data, args.image_folder, mode=args.mode)
         test_dataloader = DataLoader(test_dataset, batch_size=1, shuffle=True)
         evaluate_model(None, test_dataloader, test_dataset.get_label_map(), args=args, processor=None)
@@ -177,7 +190,7 @@ def train_model(args):
             train_loss += loss.item()
 
         train_loss /= len(train_dataloader)
-        print(f"Epoch {epoch+1}/{args.num_epochs}, Loss: {train_loss}")
+        logger.info(f"Epoch {epoch+1}/{args.num_epochs}, Loss: {train_loss}")
 
         # Log training metrics to WandB
         if args.wandb_project:
@@ -205,13 +218,13 @@ def train_model(args):
         else:
             trials += 1
             if trials >= args.patience:
-                print(f"Early stopping on epoch {epoch+1}")
+                logger.info(f"Early stopping on epoch {epoch+1}")
                 break
 
     # At the end of training, check if the final model is better than the best model and save it if necessary
     final_loss = train_loss
     if final_loss < best_loss:
-        print("Final model is better than the previously saved best model. Overwriting the best model.")
+        logger.info("Final model is better than the previously saved best model. Overwriting the best model.")
         best_model_state = custom_model.state_dict()  # Save the final model state
         best_model_filename = os.path.join(experiment_dir, 'best_model.pth')
         torch.save(custom_model.state_dict(), best_model_filename)
@@ -222,7 +235,7 @@ def train_model(args):
         # Ensure the final model is set to the best model
         if best_model_state is not None:
             custom_model.load_state_dict(best_model_state)
-            print("Final model is set to the best model during training.")
+            logger.info("Final model is set to the best model during training.")
 
     # Save the model-specific configuration file in the same folder with the original name
     config_filename = os.path.join(experiment_dir, os.path.basename(args.model_config))
@@ -345,8 +358,8 @@ def evaluate_model(model, dataloader, label_mapping, args, processor):
     accuracy = accuracy_score(true_labels, predicted_labels)
     report = classification_report(true_labels, predicted_labels, output_dict=True)
 
-    print(f"Accuracy: {accuracy}")
-    print(classification_report(true_labels, predicted_labels))
+    logger.info(f"Accuracy: {accuracy}")
+    logger.info(classification_report(true_labels, predicted_labels))
 
     # Log evaluation metrics to WandB
     if args.wandb_project:
