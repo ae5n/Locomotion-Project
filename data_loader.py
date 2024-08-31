@@ -1,5 +1,4 @@
 import os
-import json
 import torch
 from PIL import Image
 from torch.utils.data import Dataset
@@ -243,7 +242,7 @@ def florence_collate_fn(batch, processor, mode):
 class GPT4LocomotionDataset(BaseLocomotionDataset):
     def __init__(self, data, image_folder, mode='image_text'):
         """
-        GPT-4-specific dataset class supporting image-only, text-only, and image-and-text modes.
+        GPT-4-specific dataset class.
         """
         super().__init__(data, image_folder)
         self.mode = mode
@@ -265,39 +264,10 @@ class GPT4LocomotionDataset(BaseLocomotionDataset):
         label = entry['label']
 
         encoded_image = 0
-
-        if self.mode == 'image_only':
-            prompt = (
-                "You are provided with an image containing 9 field-of-view (FOV) frames from smart glasses worn by a user performing a locomotion activity "
-                "in an industrial environment. The frames capture the user’s perspective from 3 seconds before to 2 seconds after the activity begins. "
-                "Analyze the image to identify the locomotion activity. "
-                "Choose the most accurate category: Vertical Ladder Up Climbing, Vertical Ladder Down Climbing, Construction Ladder Up Climbing, Construction Ladder Down Climbing, "
-                "Level-ground Navigation, Stair Ascension, Stair Descension, Stepping over Box, Stepping over Pipe, Low Space Navigation, Sitting, Standing, or None if no match is found. "
-                "Respond with the exact category name only, without any explanations."
-            )
+        if self.mode in ['image_only', 'image_text']:
             image_path = os.path.join(self.image_folder, f"{image_id}.jpg")
             encoded_image = self.encode_image(image_path)
-        
-        elif self.mode == 'text_only':
-            prompt = (
-                "You are provided with a command from a user describing their locomotion activity in an industrial environment. "
-                "The command is as follows: \"{}\". "
-                "Analyze this command to identify the locomotion activity. "
-                "Choose the most accurate category: Vertical Ladder Up Climbing, Vertical Ladder Down Climbing, Construction Ladder Up Climbing, Construction Ladder Down Climbing, "
-                "Level-ground Navigation, Stair Ascension, Stair Descension, Stepping over Box, Stepping over Pipe, Low Space Navigation, Sitting, Standing, or None if no match is found. "
-                "Respond with the exact category name only, without any explanations."
-            ).format(text)
+            if encoded_image is None:
+                return None  # Return None if the image couldn't be processed
 
-        elif self.mode == 'image_text':
-            prompt = (
-                "You are provided with an image containing 9 field-of-view (FOV) frames from smart glasses worn by a user performing a locomotion activity "
-                "in an industrial environment. The frames capture the user’s perspective from 3 seconds before to 2 seconds after the activity begins. "
-                "Along with the frames, the user gives the following command: \"{}\". Analyze both the image and the command to identify the locomotion activity. "
-                "Choose the most accurate category: Vertical Ladder Up Climbing, Vertical Ladder Down Climbing, Construction Ladder Up Climbing, Construction Ladder Down Climbing, "
-                "Level-ground Navigation, Stair Ascension, Stair Descension, Stepping over Box, Stepping over Pipe, Low Space Navigation, Sitting, Standing, or None if no match is found. "
-                "Respond with the exact category name only, without any explanations."
-            ).format(text)
-            image_path = os.path.join(self.image_folder, f"{image_id}.jpg")
-            encoded_image = self.encode_image(image_path)
-
-        return image_id, prompt, encoded_image, label
+        return image_id, text, encoded_image, label

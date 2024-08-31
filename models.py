@@ -1,5 +1,6 @@
 import torch
 import torch.nn as nn
+import json
 
 class CustomFusionModule(nn.Module):
     def __init__(self, method, embedding_dim1, embedding_dim2=None):
@@ -99,3 +100,95 @@ class CustomImageBindModel(nn.Module):
 
         logits = self.fc(combined_embeddings)
         return logits
+
+class CustomGPT4oModel(nn.Module):
+    def __init__(self, num_classes, model_name, mode='image_text', client=None):
+        super(CustomGPT4oModel, self).__init__()
+        self.mode = mode
+        self.num_classes = num_classes
+        self.model_name = model_name
+        self.client = client
+        self.valid_labels = None 
+    def set_valid_labels(self, label_mapping):
+        self.valid_labels = list(label_mapping.keys())
+    
+    def construct_prompt(self, text=None):
+        if self.mode == 'image_only':
+            return (
+                "You are provided with an image containing 9 field-of-view (FOV) frames from smart glasses worn by a user. "
+                "The frames capture the user’s perspective from 3 seconds before to 2 seconds after the activity begins. "
+                "Analyze the image to identify the locomotion activity."
+            )
+        elif self.mode == 'text_only':
+            return (
+                f"The command is as follows: \"{text}\". "
+                "Analyze this command to identify the locomotion activity."
+            )
+        elif self.mode == 'image_text':
+            return (
+                "You are provided with an image containing 9 field-of-view (FOV) frames from smart glasses worn by a user. "
+                "The frames capture the user’s perspective from 3 seconds before to 2 seconds after the activity begins. "
+                f"The user also gives the following command: \"{text}\". "
+                "Analyze both the image and the command to identify the locomotion activity."
+            )
+
+    def predict(self, text, encoded_image=None, temperature=0.7, top_p=0.9, frequency_penalty=0.0, presence_penalty=0.0, max_tokens=50, model_name=None):
+        if model_name is not None:
+            self.model_name = model_name
+        function = {
+            "name": "predict_locomotion_activity",
+            "description": "Predict the locomotion activity.",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "prediction": {
+                        "type": "string",
+                        "enum": self.valid_labels,
+                        "description": "The predicted locomotion activity."
+                    }
+                },
+                "required": ["prediction"]
+            }
+        }
+        prompt = self.construct_prompt(text=text)
+        mode_info = {
+            'image_only': 'based on the image provided.',
+            'text_only': 'based on the command text provided.',
+            'image_text': 'based on both the image and the command text provided.'
+        }[self.mode]
+        system_content = (
+            f"You are an AI specialized in q classification task. "
+            f"The task involves identifying locomotion activities in an industrial environment {mode_info}"
+        )
+
+        if self.mode in ['image_only', 'image_text']:
+            message = [
+                {"role": "system", "content": system_content},
+                {"role": "user", "content": [
+                    {"type": "text", "text": prompt},
+                    {"type": "image_url", "image_url": {
+                        "url": f"data:image/png;base64,{encoded_image}"}
+                    }
+                ]}
+            ]
+        elif self.mode == 'text_only':
+            message = [
+                {"role": "system", "content": system_content},
+                {"role": "user", "content": prompt}
+            ]
+
+        response = self.client.chat.completions.create(
+            model=self.model_name,
+            messages=message,
+            functions=[function],
+            function_call={"name": "predict_locomotion_activity"},
+            max_tokens=max_tokens,
+            temperature=temperature,
+            top_p=top_p,
+            frequency_penalty=frequency_penalty,
+            presence_penalty=presence_penalty
+        )
+        function_call_arguments = json.loads(response.choices[0].message.function_call.arguments)
+        predicted_label = function_call_arguments["prediction"]
+        return predicted_label
+
