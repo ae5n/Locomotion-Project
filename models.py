@@ -157,7 +157,7 @@ class CustomGPT4oModel(nn.Module):
             'image_text': 'based on both the image and the command text provided.'
         }[self.mode]
         system_content = (
-            f"You are an AI specialized in q classification task. "
+            f"You are an AI specialized in a classification task. "
             f"The task involves identifying locomotion activities in an industrial environment {mode_info}"
         )
 
