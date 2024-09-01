@@ -209,6 +209,10 @@ def train_model(args):
         # Learning rate scheduling
         scheduler.step(train_loss)
 
+        # Log when the learning rate is reduced
+        if optimizer.param_groups[0]['lr'] < args.learning_rate:
+            logger.info(f"Learning rate reduced to {optimizer.param_groups[0]['lr']}")
+
         # Early stopping and best model tracking
         if train_loss < best_loss:
             best_loss = train_loss
@@ -413,7 +417,9 @@ if __name__ == "__main__":
     
     # Initialize WandB 
     if config.get('wandb_project', None):
-        wandb.init(project=config['wandb_project'], name=os.path.splitext(os.path.basename(config['model_config']))[0])
+        timestamp_str = time.strftime('%m%d_%H%M')
+        run_name = f"{os.path.splitext(os.path.basename(config['model_config']))[0]}_{timestamp_str}"
+        wandb.init(project=config['wandb_project'], name=run_name)
         wandb.config.update(config)
 
     # Train and test the model with the provided configuration
