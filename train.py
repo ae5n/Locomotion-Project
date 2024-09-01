@@ -345,9 +345,10 @@ def evaluate_model(model, dataloader, label_mapping, args, processor):
     misclassified_df = eval_df[eval_df['True Label'] != eval_df['Predicted Label']]
 
     # Log both the evaluation DataFrame and the misclassified samples to WandB
+    config_name = os.path.splitext(os.path.basename(args.model_config))[0]
     if args.wandb_project:
-        wandb.log({"eval_dataframe": wandb.Table(dataframe=eval_df)}) 
-        wandb.log({"misclassified_samples": wandb.Table(dataframe=misclassified_df)})
+        wandb.log({f"{config_name}_predictions": wandb.Table(dataframe=eval_df)}) 
+        wandb.log({f"{config_name}_misclassified_samples": wandb.Table(dataframe=misclassified_df)})
 
     # Calculate accuracy and print classification report
     accuracy = accuracy_score(true_labels, predicted_labels)
