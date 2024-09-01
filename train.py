@@ -141,7 +141,7 @@ def train_model(args):
     os.makedirs(experiment_dir, exist_ok=True)
 
     best_model_state = None  # Initialize best_model_state
-
+    logger.info("Training started.")
     for epoch in range(args.num_epochs):
         custom_model.train()
         train_loss = 0.0
@@ -262,7 +262,8 @@ def evaluate_model(model, dataloader, label_mapping, args, processor):
 
     # Reverse the label map for lookup
     inverse_label_map = {v: k for k, v in label_mapping.items()}
-
+    
+    logger.info("Evaluation started.")
     with torch.no_grad():
         for batch in dataloader:
             if args.model_name == "clip-vit-large-patch14-336":
