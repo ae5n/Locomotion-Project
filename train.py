@@ -4,7 +4,6 @@ from torch.utils.data import DataLoader
 from transformers import CLIPProcessor, CLIPModel, ViltProcessor, ViltModel, AutoProcessor, AutoModelForCausalLM
 import openai
 from sklearn.metrics import accuracy_score, classification_report, confusion_matrix
-from sklearn.utils.multiclass import unique_labels
 from torch.optim.lr_scheduler import ReduceLROnPlateau
 import json
 import yaml
@@ -356,19 +355,22 @@ def evaluate_model(model, dataloader, label_mapping, args, processor):
 
     logger.info(f"Accuracy: {accuracy}")
     logger.info(classification_report(true_labels, predicted_labels))
-
-    # Log evaluation metrics to WandB
+    
+    # Flatten the classification report dictionary
+    flattened_report = {}
+    for key, value in report.items():
+        if isinstance(value, dict):
+            for sub_key, sub_value in value.items():
+                flattened_report[f"{key}_{sub_key}"] = sub_value
+        else:
+            flattened_report[key] = value
+    
+    # Log the flattened classification report to WandB
     if args.wandb_project:
-        wandb.log({
-            "accuracy": accuracy,
-            "precision": report['weighted avg']['precision'],
-            "recall": report['weighted avg']['recall'],
-            "f1_score": report['weighted avg']['f1-score'],
-            "classification_report": report
-        })
+        wandb.log(flattened_report)
+
     # Compute the confusion matrix
-    valid_labels = unique_labels(true_labels, predicted_labels)
-    cm = confusion_matrix(true_labels, predicted_labels, labels=valid_labels)
+    cm = confusion_matrix(true_labels, predicted_labels)
 
     # Generate the confusion matrix plot
     plt.figure(figsize=(20, 16), dpi=300)
