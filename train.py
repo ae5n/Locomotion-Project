@@ -4,6 +4,7 @@ from torch.utils.data import DataLoader
 from transformers import CLIPProcessor, CLIPModel, ViltProcessor, ViltModel, AutoProcessor, AutoModelForCausalLM
 import openai
 from sklearn.metrics import accuracy_score, classification_report, confusion_matrix
+from sklearn.utils.multiclass import unique_labels
 from torch.optim.lr_scheduler import ReduceLROnPlateau
 import json
 import yaml
@@ -327,7 +328,7 @@ def evaluate_model(model, dataloader, label_mapping, args, processor):
 
                 predicted_labels.extend(preds.cpu().numpy())
                 ids_list.extend(ids)
-            # break
+            break
     # Convert indices to labels using the inverse label map
     if args.model_name not in ["microsoft/Florence-2-large", "gpt-4o"]:
         true_labels = [inverse_label_map[label] for label in true_labels]
@@ -370,7 +371,8 @@ def evaluate_model(model, dataloader, label_mapping, args, processor):
         wandb.log(flattened_report)
 
     # Compute the confusion matrix
-    cm = confusion_matrix(true_labels, predicted_labels)
+    valid_labels = unique_labels(true_labels, predicted_labels)
+    cm = confusion_matrix(true_labels, predicted_labels, labels=valid_labels)
 
     # Generate the confusion matrix plot
     plt.figure(figsize=(20, 16), dpi=300)
