@@ -198,7 +198,7 @@ class FlorenceLocomotionDataset(BaseLocomotionDataset):
                     "in an industrial environment. The frames capture the user’s perspective from 3 seconds before to 2 seconds after the activity begins. "
                     "Along with the frames, the user gives the following command: \"{}\". Analyze both the image and the command to identify the locomotion activity. "
                     "Choose the most accurate category: Vertical Ladder Up Climbing, Vertical Ladder Down Climbing, Construction Ladder Up Climbing, Construction Ladder Down Climbing, "
-                    "Level-ground Navigation, Stair Ascension, Stair Descension, Stepping over Box, Stepping over Pipe, Low Space Navigation, Sitting, Standing, or None if no match is found. "
+                    "Level-ground Navigation, Stair Ascension, Stair Descension, Stepping over Box, Stepping over Pipe, Low Space Navigation, Sitting, and Standing."
                     "Respond with the exact category name only, without any explanations."
                 ).format(entry['text'])
             else:
@@ -210,7 +210,7 @@ class FlorenceLocomotionDataset(BaseLocomotionDataset):
                     "in an industrial environment. The frames capture the user’s perspective from 3 seconds before to 2 seconds after the activity begins. "
                     "Analyze the image to identify the locomotion activity. "
                     "Choose the most accurate category: Vertical Ladder Up Climbing, Vertical Ladder Down Climbing, Construction Ladder Up Climbing, Construction Ladder Down Climbing, "
-                    "Level-ground Navigation, Stair Ascension, Stair Descension, Stepping over Box, Stepping over Pipe, Low Space Navigation, Sitting, Standing, or None if no match is found. "
+                    "Level-ground Navigation, Stair Ascension, Stair Descension, Stepping over Box, Stepping over Pipe, Low Space Navigation, Sitting, and Standing "
                     "Respond with the exact category name only, without any explanations."
                 )
             else:
