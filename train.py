@@ -316,7 +316,7 @@ def evaluate_model(model, dataloader, label_mapping, args, processor):
                     predicted_labels.append(predicted_label)
                     true_labels.append(labels[i])
                     ids_list.append(ids[i])
-                    logger.info(f"Processed {i + 1} samples ... ")
+                    logger.info(f"Processed {len(ids_list)} samples ... ")
                     time.sleep(2)  # To avoid hitting API rate limits
 
             if args.model_name not in ["microsoft/Florence-2-large", "gpt-4o"]:
@@ -408,8 +408,9 @@ if __name__ == "__main__":
     
     # Initialize WandB 
     if config.get('wandb_project', None):
-        wandb.init(project=config['wandb_project'])
+        wandb.init(project=config['wandb_project'], name=os.path.splitext(os.path.basename(config['model_config']))[0])
         wandb.config.update(config)
 
     # Train and test the model with the provided configuration
     train_model(argparse.Namespace(**config))
+    wandb.finish()
