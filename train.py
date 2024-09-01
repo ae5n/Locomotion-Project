@@ -418,9 +418,7 @@ if __name__ == "__main__":
     
     # Initialize WandB 
     if config.get('wandb_project', None):
-        timestamp_str = time.strftime('%m%d_%H%M')
-        run_name = f"{os.path.splitext(os.path.basename(config['model_config']))[0]}_{timestamp_str}"
-        wandb.init(project=config['wandb_project'], name=run_name)
+        wandb.init(project=config['wandb_project'], name=os.path.splitext(os.path.basename(config['model_config']))[0])
         wandb.config.update(config)
 
     # Train and test the model with the provided configuration
