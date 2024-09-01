@@ -328,7 +328,7 @@ def evaluate_model(model, dataloader, label_mapping, args, processor):
 
                 predicted_labels.extend(preds.cpu().numpy())
                 ids_list.extend(ids)
-            break
+            # break
     # Convert indices to labels using the inverse label map
     if args.model_name not in ["microsoft/Florence-2-large", "gpt-4o"]:
         true_labels = [inverse_label_map[label] for label in true_labels]
