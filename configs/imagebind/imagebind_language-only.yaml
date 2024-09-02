@@ -1,0 +1,7 @@
+model_name: "imagebind_huge"
+batch_size: 5
+learning_rate: 0.00001
+mode: text_only
+num_epochs: 22
+patience: 5
+
