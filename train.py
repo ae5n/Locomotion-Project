@@ -71,6 +71,7 @@ def train_model(args):
         from data_loader import ImageBindLocomotionDataset
         from models import CustomImageBindModel
         from imagebind.models import imagebind_model
+        processor = None
         base_model = imagebind_model.imagebind_huge(pretrained=True)
         train_dataset = ImageBindLocomotionDataset(train_data, args.image_folder, args.audio_folder, mode=args.mode, device=args.device)
         test_dataset = ImageBindLocomotionDataset(test_data, args.image_folder, args.audio_folder, mode=args.mode, device=args.device)
@@ -206,12 +207,14 @@ def train_model(args):
                 "cpu_memory_usage": torch.cuda.memory_reserved(args.device) / (1024 ** 2) if args.device == 'cuda' else 0
             })
 
+        previous_lr = optimizer.param_groups[0]['lr']
         # Learning rate scheduling
         scheduler.step(train_loss)
 
         # Log when the learning rate is reduced
-        if optimizer.param_groups[0]['lr'] < args.learning_rate:
-            logger.info(f"Learning rate reduced to {optimizer.param_groups[0]['lr']}")
+        current_lr = optimizer.param_groups[0]['lr']
+        if current_lr < previous_lr:
+            logger.info(f"Learning rate reduced from {previous_lr} to {current_lr}")
 
         # Early stopping and best model tracking
         if train_loss < best_loss:
@@ -240,10 +243,11 @@ def train_model(args):
             processor_dir = os.path.join(experiment_dir, 'florence_processor')
             processor.save_pretrained(processor_dir)
     else:
-        # Ensure the final model is set to the best model
         if best_model_state is not None:
             custom_model.load_state_dict(best_model_state)
-            logger.info("Final model is set to the best model during training.")
+            logger.info(f"Final model did not outperform the best model. Loaded the best model with loss: {best_loss:.4f}")
+        else:
+            logger.info(f"No better model found during training. Using the model from the last epoch.")
 
     # Save the model-specific configuration file in the same folder with the original name
     config_filename = os.path.join(experiment_dir, os.path.basename(args.model_config))
