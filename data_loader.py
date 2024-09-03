@@ -214,7 +214,7 @@ class FlorenceLocomotionDataset(BaseLocomotionDataset):
                     "Respond with the exact category name only, without any explanations."
                 )
             else:
-                text_input = ""  # No text, only image
+                text_input = " "  # No text, only image
 
         # Extract the label and load the image
         label = entry['label']
