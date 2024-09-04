@@ -115,19 +115,19 @@ class CustomGPT4oModel(nn.Module):
     def construct_prompt(self, text=None):
         if self.mode == 'image_only':
             return (
-                "You are provided with an image containing 9 field-of-view (FOV) frames from smart glasses worn by a user. "
-                "The frames capture the user’s perspective from 3 seconds before to 2 seconds after the activity begins. "
+                "You are provided with field-of-view (FOV) frames from smart glasses worn by a user. "
+                "The frames capture the user's perspective during the moments leading up to and the beginning of an activity. "
                 "Analyze the image to identify the locomotion activity."
             )
         elif self.mode == 'text_only':
             return (
-                f"The command is as follows: \"{text}\". "
+                f"The user is performing an activity and provides the following command: \"{text}\". "
                 "Analyze this command to identify the locomotion activity."
             )
         elif self.mode == 'image_text':
             return (
-                "You are provided with an image containing 9 field-of-view (FOV) frames from smart glasses worn by a user. "
-                "The frames capture the user’s perspective from 3 seconds before to 2 seconds after the activity begins. "
+                "You are provided with field-of-view (FOV) frames from smart glasses worn by a user. "
+                "The frames capture the user's perspective during the moments leading up to and the beginning of an activity. "
                 f"The user also gives the following command: \"{text}\". "
                 "Analyze both the image and the command to identify the locomotion activity."
             )
