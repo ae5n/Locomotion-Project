@@ -1,7 +1,7 @@
 model_name: "clip-vit-large-patch14-336"
-batch_size: 4
+batch_size: 5
 fusion_method: concat
-learning_rate: 0.0001
+learning_rate: 0.00005
 mode: image_text
-num_epochs: 35
+num_epochs: 15
 patience: 6
