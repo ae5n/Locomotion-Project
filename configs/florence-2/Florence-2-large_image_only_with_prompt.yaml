@@ -1,8 +1,0 @@
-model_name: "microsoft/Florence-2-large"
-batch_size: 1
-learning_rate: 1.0e-06
-mode: image_only
-num_epochs: 3
-patience: 3
-use_prompt: true
-freeze_vision_encoder: false
