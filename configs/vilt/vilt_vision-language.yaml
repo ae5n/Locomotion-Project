@@ -1,0 +1,6 @@
+model_name: "vilt-b32-mlm"
+batch_size: 5
+learning_rate: 0.00005
+mode: image_text
+num_epochs: 15
+patience: 6
