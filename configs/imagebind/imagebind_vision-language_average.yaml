@@ -1,6 +1,6 @@
 model_name: "imagebind_huge"
 batch_size: 5
-fusion_method: concat
+fusion_method: average
 learning_rate: 0.00001
 mode: image_text
 num_epochs: 22
