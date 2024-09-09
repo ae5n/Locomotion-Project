@@ -90,6 +90,13 @@ def train_model(args):
         if getattr(args, 'freeze_vision_encoder', None):
             for param in custom_model.vision_tower.parameters():
                 param.requires_grad = False
+        
+        test_dataloader = DataLoader(test_dataset, batch_size=args.batch_size, shuffle=False, collate_fn=collate_fn)
+        if args.zero_shot:
+            logger.info("Zero-shot evaluation mode. Skipping training.")
+            custom_model = custom_model.to(args.device)
+            evaluate_model(custom_model, test_dataloader, test_dataset.get_label_map(), args, processor)
+            return
 
     elif args.model_name == "gpt-4o":
         client = openai.OpenAI(api_key=os.getenv("OPENAI_API_KEY"))
@@ -304,6 +311,24 @@ def evaluate_model(model, dataloader, label_mapping, args, processor):
                 generated_ids = model.generate(input_ids=inputs['input_ids'], pixel_values=inputs['pixel_values'], max_new_tokens=50)
                 generated_text = processor.batch_decode(generated_ids, skip_special_tokens=True)
                 true_text = processor.batch_decode(labels, skip_special_tokens=True)
+            
+                if args.zero_shot:
+                    if 'output_table' not in locals():
+                        output_table = []  # Initialize only if not already defined
+
+                    for generated, true, id in zip(generated_text, true_text, ids):
+                        print(f"\nGenerated: {generated}")
+                        print(f"True Label: {true}")
+
+                        # Append the data to output_table
+                        output_table.append([id, generated, true])
+
+                    # Log the table to WandB after processing all batches
+                    if args.wandb_project and len(output_table) > 0:
+                        wandb.log({f"florence-2_zero-shot__outputs": wandb.Table(columns=["ID", "Generated", "Label"], data=output_table)})
+
+                    continue  # Skip metric calculation in zero-shot mode
+
                 predicted_labels.extend(generated_text)
                 true_labels.extend(true_text)
                 ids_list.extend(ids)
