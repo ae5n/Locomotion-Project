@@ -194,18 +194,22 @@ class FlorenceLocomotionDataset(BaseLocomotionDataset):
         if self.mode == 'image_text':
             if self.use_prompt:
                 text_input = (
-                    "You are provided with field-of-view (FOV) frames from smart glasses worn by a user performing a locomotion activity "
-                    "in an industrial environment. The frames capture the user’s perspective during the moments leading up to and the beginning of the activity. "
-                    "Along with the frames, the user gives the following command: \"{}\". Analyze both the image and the command to identify the locomotion activity."
+                    "You are provided with an image containing field-of-view (FOV) frames from smart glasses worn by a user performing a locomotion activity "
+                    "in an industrial environment, along with a spoken command issued by the user. "
+                    "The 9 frames in the image are sampled in chronological order over a 5-second period, with 3 seconds before and 2 seconds after the command was given, "
+                    "providing context for the user's activity. "
+                    "The command is: \"{}\". "
+                    "Analyze both the sequential frames and the command together to predict the locomotion activity the user is performing."
                 ).format(entry['text'])
             else:
                 text_input = entry['text']  # Only command text
         elif self.mode == 'image_only':
             if self.use_prompt:
                 text_input = (
-                    "You are provided with field-of-view (FOV) frames from smart glasses worn by a user performing a locomotion activity "
-                    "in an industrial environment. The frames capture the user’s perspective during the moments leading up to and the beginning of the activity. "
-                    "Analyze the image to identify the locomotion activity."
+                    "You are provided with an image containing field-of-view (FOV) frames from smart glasses worn by a user performing a locomotion activity "
+                    "in an industrial environment. The 9 frames in the image are sampled in chronological order over a 5-second period, with 3 seconds before and 2 seconds after the command was given, "
+                    "providing context for the user's activity. "
+                    "Analyze the sequential frames to identify the locomotion activity the user is performing."
                 )
             else:
                 text_input = " "  # No text, only image
