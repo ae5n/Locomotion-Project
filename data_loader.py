@@ -196,7 +196,7 @@ class FlorenceLocomotionDataset(BaseLocomotionDataset):
                 text_input = (
                     "You are provided with an image containing field-of-view (FOV) frames from smart glasses worn by a user performing a locomotion activity "
                     "in an industrial environment, along with a spoken command issued by the user. "
-                    "The 9 frames in the image are sampled in chronological order over a 5-second period, with 3 seconds before and 2 seconds after the command was given, "
+                    "The 9 frames in the image are sampled in chronological order over a 5-second period, with 2 seconds before and 3 seconds after the command was given, "
                     "providing context for the user's activity. "
                     "The command is: \"{}\". "
                     "Analyze both the sequential frames and the command together to predict the locomotion activity the user is performing."
@@ -207,7 +207,7 @@ class FlorenceLocomotionDataset(BaseLocomotionDataset):
             if self.use_prompt:
                 text_input = (
                     "You are provided with an image containing field-of-view (FOV) frames from smart glasses worn by a user performing a locomotion activity "
-                    "in an industrial environment. The 9 frames in the image are sampled in chronological order over a 5-second period, with 3 seconds before and 2 seconds after the command was given, "
+                    "in an industrial environment. The 9 frames in the image are sampled in chronological order over a 5-second period, with 2 seconds before and 3 seconds after the command was given, "
                     "providing context for the user's activity. "
                     "Analyze the sequential frames to identify the locomotion activity the user is performing."
                 )

@@ -1,7 +1,7 @@
-train_json_path: '/content/drive/MyDrive/Locomotion Data/dataset_32/train_data_32.json'
-test_json_path: '/content/drive/MyDrive/Locomotion Data/dataset_32/test_data_32.json'
-image_folder: '/content/drive/MyDrive/Locomotion Data/dataset_32/images_32'
-audio_folder: '/content/drive/MyDrive/Locomotion Data/dataset_32/audios_32'
+train_json_path: '/content/drive/MyDrive/Locomotion Data/dataset_23/train_data_23.json'
+test_json_path: '/content/drive/MyDrive/Locomotion Data/dataset_23/test_data_23.json'
+image_folder: '/content/drive/MyDrive/Locomotion Data/dataset_23/images_23'
+audio_folder: '/content/drive/MyDrive/Locomotion Data/dataset_23/audios_23'
 output_dir: '/content/drive/MyDrive/Colab Notebooks/Locomotion/Trained'
 device: cuda
 wandb_project: locomotion-project-32
