@@ -1,6 +1,7 @@
 import torch
 import torch.nn as nn
 import json
+import Levenshtein
 
 class CustomFusionModule(nn.Module):
     def __init__(self, method, embedding_dim1, embedding_dim2=None):
@@ -109,7 +110,7 @@ class CustomGPT4oModel(nn.Module):
         self.model_name = model_name
         self.client = client
         self.valid_labels = None
-        self.strategy = strategy 
+        self.strategy = strategy
     def set_valid_labels(self, label_mapping):
         self.valid_labels = list(label_mapping.keys())
     
@@ -159,6 +160,11 @@ class CustomGPT4oModel(nn.Module):
                     "Combine information from both the frames and the command to predict the locomotion activity the user is performing."
                 )
 
+    def get_best_label_levenshtein(self, predicted_label):
+        """ Use Levenshtein similarity to find the closest valid label. """
+        best_label = max(self.valid_labels, key=lambda label: Levenshtein.ratio(predicted_label, label))
+        return best_label
+
     def predict(self, text, encoded_image=None, temperature=0.7, top_p=0.9, frequency_penalty=0.0, presence_penalty=0.0, max_tokens=50, model_name=None):
         if model_name is not None:
             self.model_name = model_name
@@ -180,8 +186,9 @@ class CustomGPT4oModel(nn.Module):
         prompt = self.construct_prompt(text=text)
         
         system_content = (
-            f"You are an AI specialized in a classification task. "
-            f"The task involves identifying locomotion activities based on the provided information."
+            f"You are an AI specialized in identifying locomotion activities. The valid locomotion activities are: {self.valid_labels}. "
+            f"Please provide a step-by-step reasoning process for your classification, followed by the final prediction in the format: "
+            f"Reasoning: <your reasoning path>. Prediction: <your final prediction>."
         )
 
         if self.mode in ['image_only', 'image_text']:
@@ -200,18 +207,42 @@ class CustomGPT4oModel(nn.Module):
                 {"role": "user", "content": prompt}
             ]
 
+        # response = self.client.chat.completions.create(
+        #     model=self.model_name,
+        #     messages=message,
+        #     functions=[function],
+        #     function_call={"name": "predict_locomotion_activity"},
+        #     max_tokens=max_tokens,
+        #     temperature=temperature,
+        #     top_p=top_p,
+        #     frequency_penalty=frequency_penalty,
+        #     presence_penalty=presence_penalty
+        # )
+
         response = self.client.chat.completions.create(
-            model=self.model_name,
-            messages=message,
-            functions=[function],
-            function_call={"name": "predict_locomotion_activity"},
-            max_tokens=max_tokens,
-            temperature=temperature,
-            top_p=top_p,
-            frequency_penalty=frequency_penalty,
-            presence_penalty=presence_penalty
+        model=self.model_name,
+        messages=message,
+        max_tokens=max_tokens,
+        temperature=temperature,
+        top_p=top_p,
+        frequency_penalty=frequency_penalty,
+        presence_penalty=presence_penalty
         )
-        function_call_arguments = json.loads(response.choices[0].message.function_call.arguments)
-        predicted_label = function_call_arguments["prediction"]
-        return predicted_label
+
+        print('GPT Full Response:', response)
+
+        response_content = response.choices[0].message.content
+        
+        if "Reasoning:" in response_content and "Prediction:" in response_content:
+            reasoning_path = response_content.split("Reasoning: ")[1].split("Prediction: ")[0].strip()
+            predicted_label = response_content.split("Prediction: ")[1].strip()
+        else:
+            reasoning_path = "None"
+            predicted_label = response_content.strip()
+        
+        predicted_label = self.get_best_label_levenshtein(predicted_label)
+
+        # function_call_arguments = json.loads(response.choices[0].message.function_call.arguments)
+        # predicted_label = function_call_arguments["prediction"]
+        return predicted_label, reasoning_path
 
