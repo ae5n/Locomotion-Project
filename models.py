@@ -102,38 +102,62 @@ class CustomImageBindModel(nn.Module):
         return logits
 
 class CustomGPT4oModel(nn.Module):
-    def __init__(self, num_classes, model_name, mode='image_text', client=None):
+    def __init__(self, num_classes, model_name, mode='image_text', strategy='default', client=None):
         super(CustomGPT4oModel, self).__init__()
         self.mode = mode
         self.num_classes = num_classes
         self.model_name = model_name
         self.client = client
-        self.valid_labels = None 
+        self.valid_labels = None
+        self.strategy = strategy 
     def set_valid_labels(self, label_mapping):
         self.valid_labels = list(label_mapping.keys())
     
     def construct_prompt(self, text=None):
-        if self.mode == 'image_only':
-            return (
-                "You are provided with an image containing field-of-view (FOV) frames from smart glasses worn by a user performing a locomotion activity "
-                "in an industrial environment. The 9 frames in the image are sampled in chronological order over a 5-second period, with 2 seconds before and 3 seconds after the command was given, "
-                "providing context for the user's activity. "
-                "Analyze the sequential frames to identify the locomotion activity the user is performing."
-            )
-        elif self.mode == 'text_only':
-            return (
-                f"The user is performing a locomotion activity in an industrial environment and has issued the following command: \"{text}\". "
-                "Analyze the command to identify the locomotion activity the user is performing."
-            )
-        elif self.mode == 'image_text':
-            return (
-                "You are provided with an image containing field-of-view (FOV) frames from smart glasses worn by a user performing a locomotion activity "
-                "in an industrial environment, along with a spoken command issued by the user. "
-                "The 9 frames in the image are sampled in chronological order over a 5-second period, with 2 seconds before and 3 seconds after the command was given, "
-                "providing context for the user's activity. "
-                f"The command is: \"{text}\". "
-                "Analyze both the sequential frames and the command together to predict the locomotion activity the user is performing."
-            )
+        """ Construct the prompt based on the strategy and mode. """
+        if self.strategy == 'default':
+            if self.mode == 'image_only':
+                return (
+                    "You are provided with an image containing field-of-view (FOV) frames from smart glasses worn by a user performing a locomotion activity "
+                    "in an industrial environment. The 9 frames in the image are sampled in chronological order over a 5-second period, with 2 seconds before and 3 seconds after the command was given, "
+                    "providing context for the user's activity. "
+                    "Based on the frames, identify the locomotion activity the user is performing."
+                )
+            elif self.mode == 'text_only':
+                return (
+                    f"The user is performing a locomotion activity in an industrial environment and has issued the following command: \"{text}\". "
+                    "Based on the command, identify the locomotion activity the user is performing."
+                )
+            elif self.mode == 'image_text':
+                return (
+                    "You are provided with an image containing field-of-view (FOV) frames from smart glasses worn by a user performing a locomotion activity "
+                    "in an industrial environment, along with a spoken command issued by the user. "
+                    "The 9 frames in the image are sampled in chronological order over a 5-second period, with 2 seconds before and 3 seconds after the command was given, "
+                    "providing context for the user's activity. "
+                    f"The command is: \"{text}\". "
+                    "Based on the frames and the command, identify the locomotion activity the user is performing."
+                )
+        elif self.strategy == 'cot':
+            if self.mode == 'image_only':
+                return (
+                    "You are provided with an image containing field-of-view (FOV) frames from smart glasses worn by a user performing a locomotion activity "
+                    "in an industrial environment. The 9 frames in the image are sampled in chronological order over a 5-second period, with 2 seconds before and 3 seconds after the command was given, "
+                    "Think step by step: analyze the frames one by one to understand how the user's perspective changes over time, and infer the locomotion activity based on the sequence."
+                )
+            elif self.mode == 'text_only':
+                return (
+                    f"The user is performing a locomotion activity in an industrial environment and has issued the following command: \"{text}\". "
+                    "Think step by step: break down the meaning of the command, understand the user's intention, and determine the locomotion activity the user is performing."
+                )
+            elif self.mode == 'image_text':
+                return (
+                    "You are provided with an image containing field-of-view (FOV) frames from smart glasses worn by a user performing a locomotion activity "
+                    "in an industrial environment, along with a spoken command issued by the user. "
+                    "The 9 frames in the image are sampled in chronological order over a 5-second period, with 2 seconds before and 3 seconds after the command was given, "
+                    f"The command is: \"{text}\". "
+                    "Think step by step: analyze the sequence of frames to understand how the user's perspective changes over time, and interpret the command to understand their intention. "
+                    "Combine information from both the frames and the command to predict the locomotion activity the user is performing."
+                )
 
     def predict(self, text, encoded_image=None, temperature=0.7, top_p=0.9, frequency_penalty=0.0, presence_penalty=0.0, max_tokens=50, model_name=None):
         if model_name is not None:
@@ -154,14 +178,10 @@ class CustomGPT4oModel(nn.Module):
             }
         }
         prompt = self.construct_prompt(text=text)
-        mode_info = {
-            'image_only': 'based on the image provided.',
-            'text_only': 'based on the command text provided.',
-            'image_text': 'based on both the image and the command text provided.'
-        }[self.mode]
+        
         system_content = (
             f"You are an AI specialized in a classification task. "
-            f"The task involves identifying locomotion activities in an industrial environment {mode_info}"
+            f"The task involves identifying locomotion activities based on the provided information."
         )
 
         if self.mode in ['image_only', 'image_text']:
