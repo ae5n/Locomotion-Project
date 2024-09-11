@@ -270,6 +270,7 @@ def evaluate_model(model, dataloader, label_mapping, args, processor):
     true_labels = []
     predicted_labels = []
     ids_list = []
+    gpt_reasoning_paths = []
 
     # Reverse the label map for lookup
     inverse_label_map = {v: k for k, v in label_mapping.items()}
@@ -337,7 +338,7 @@ def evaluate_model(model, dataloader, label_mapping, args, processor):
                 model.set_valid_labels(label_mapping)
                 ids, texts, encoded_images, labels = batch
                 for i in range(len(ids)):
-                    predicted_label = model.predict(
+                    predicted_label, reasoning_path = model.predict(
                         text=texts[i], 
                         encoded_image=encoded_images[i] if args.mode in ['image_only', 'image_text'] else None,
                         model_name=args.model_name,
@@ -350,6 +351,7 @@ def evaluate_model(model, dataloader, label_mapping, args, processor):
                     predicted_labels.append(predicted_label)
                     true_labels.append(labels[i])
                     ids_list.append(ids[i])
+                    gpt_reasoning_paths.append(reasoning_path)
                     logger.info(f"Processed {len(ids_list)} samples ... ")
                     time.sleep(2)  # To avoid hitting API rate limits
 
@@ -368,13 +370,20 @@ def evaluate_model(model, dataloader, label_mapping, args, processor):
         true_labels = [inverse_label_map[label] for label in true_labels]
         predicted_labels = [inverse_label_map[label] for label in predicted_labels]
 
-    # Create a DataFrame with ID, true labels, and predicted labels
-    eval_df = pd.DataFrame({
-        'ID': ids_list,
-        'True Label': true_labels,
-        'Predicted Label': predicted_labels
-    })
-
+    if args.model_name == "gpt-4o":
+        eval_df = pd.DataFrame({
+            'ID': ids_list,
+            'True Label': true_labels,
+            'Predicted Label': predicted_labels,
+            'Reasoning Path': gpt_reasoning_paths  # Add reasoning paths only for GPT-4o
+        })
+    else:
+        eval_df = pd.DataFrame({
+            'ID': ids_list,
+            'True Label': true_labels,
+            'Predicted Label': predicted_labels
+        })
+    
     # Filter out misclassified samples
     misclassified_df = eval_df[eval_df['True Label'] != eval_df['Predicted Label']]
 
