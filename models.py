@@ -160,10 +160,25 @@ class CustomGPT4oModel(nn.Module):
                     "Combine information from both the frames and the command to predict the locomotion activity the user is performing."
                 )
 
-    def get_best_label_levenshtein(self, predicted_label):
-        """ Use Levenshtein similarity to find the closest valid label. """
-        best_label = max(self.valid_labels, key=lambda label: Levenshtein.ratio(predicted_label, label))
-        return best_label
+    # def get_best_label_levenshtein(self, predicted_label):
+    #     """ Use Levenshtein similarity to find the closest valid label. """
+    #     best_label = max(self.valid_labels, key=lambda label: Levenshtein.ratio(predicted_label, label))
+    #     return best_label
+    
+    # def levenshtein_similarity(self, reasoning_path):
+    #     """
+    #     Use Levenshtein similarity to match the predicted label based on the reasoning path.
+    #     """
+    #     best_label = None
+    #     highest_similarity = float('-inf')
+
+    #     for label in self.valid_labels:
+    #         similarity = Levenshtein.ratio(reasoning_path.lower(), label.lower())
+    #         if similarity > highest_similarity:
+    #             highest_similarity = similarity
+    #             best_label = label
+
+    #     return best_label
 
     def predict(self, text, encoded_image=None, temperature=0.7, top_p=0.9, frequency_penalty=0.0, presence_penalty=0.0, max_tokens=50, model_name=None):
         if model_name is not None:
@@ -185,11 +200,19 @@ class CustomGPT4oModel(nn.Module):
         }
         prompt = self.construct_prompt(text=text)
         
-        system_content = (
-            f"You are an AI specialized in identifying locomotion activities. The valid locomotion activities are: {self.valid_labels}. "
-            f"Please provide a step-by-step reasoning process for your classification, followed by the final prediction in the format: "
-            f"Reasoning: <your reasoning path>. Prediction: <your final prediction>."
-        )
+        if self.strategy == 'cot':   
+            system_content = (
+                f"You are an AI specialized in identifying locomotion activities. The valid locomotion activities are: {self.valid_labels}. "
+                f"Please provide a step-by-step reasoning process for your classification, followed by the final prediction in the format: "
+                f"Reasoning: <your reasoning path>. Prediction: <your final prediction>."
+            )
+        else:
+            # Default system prompt
+            system_content = (
+                f"You are an AI specialized in identifying locomotion activities. The valid locomotion activities are: {self.valid_labels}. "
+                f"Based on the provided information, predict the locomotion activity in this format: Prediction: <your final prediction>."
+            )
+            
 
         if self.mode in ['image_only', 'image_text']:
             message = [
@@ -231,17 +254,24 @@ class CustomGPT4oModel(nn.Module):
 
         print('GPT Full Response:', response)
 
-        response_content = response.choices[0].message.content
+        # response_content = response.choices[0].message.content
         
-        if "Reasoning:" in response_content and "Prediction:" in response_content:
-            reasoning_path = response_content.split("Reasoning: ")[1].split("Prediction: ")[0].strip()
-            predicted_label = response_content.split("Prediction: ")[1].strip()
-        else:
-            reasoning_path = "None"
-            predicted_label = response_content.strip()
+        reasoning_path = response.choices[0].message.content
         
-        predicted_label = self.get_best_label_levenshtein(predicted_label)
+        predicted_label = reasoning_path.split("Prediction: ")[1].strip().rstrip('.')
 
+        # predicted_label = self.get_best_label_levenshtein(predicted_label)
+        
+        
+        # Use Levenshtein similarity to match the label
+        # predicted_label = self.levenshtein_similarity(reasoning_path)
+        # Apply the kneeling rule to correct the predicted label
+        if "kneeling" in reasoning_path.lower() or "kneel" in reasoning_path.lower():
+            predicted_label = "Sitting"
+
+        # Print the reasoning path and the final predicted label
+        print('\nreasoning path:', reasoning_path)
+        print('predicted:', predicted_label)
         # function_call_arguments = json.loads(response.choices[0].message.function_call.arguments)
         # predicted_label = function_call_arguments["prediction"]
         return predicted_label, reasoning_path
