@@ -56,7 +56,35 @@ def train_model(args):
         base_model = CLIPModel.from_pretrained("openai/clip-vit-large-patch14-336")
         train_dataset = CLIPLocomotionDataset(train_data, args.image_folder, processor, mode=args.mode)
         test_dataset = CLIPLocomotionDataset(test_data, args.image_folder, processor, mode=args.mode)
-        custom_model = CustomCLIPModel(base_model, len(train_dataset.get_label_map()), mode=args.mode, fusion_method=getattr(args, 'fusion_method', None))
+        # Retrieve labels directly from the dataset
+        label_map = test_dataset.get_label_map()
+        label_names = list(label_map.keys())  # Get the label names
+        # If similarity-based zero-shot mode is enabled, embed the labels using CLIP text encoder
+        if args.similarity:
+            test_dataloader = DataLoader(test_dataset, batch_size=args.batch_size, shuffle=False, collate_fn=lambda x: clip_collate_fn(x, mode=args.mode))
+            logger.info("Embedding labels for similarity-based zero-shot classification.")
+            label_inputs = processor(text=label_names, padding=True, return_tensors="pt")
+            label_inputs = {k: v.to(args.device) for k, v in label_inputs.items()}
+            base_model = base_model.to(args.device)
+            with torch.no_grad():
+                model_output = base_model.text_model(**label_inputs)
+            
+            label_embeddings = model_output.pooler_output
+
+
+            label_embeddings = label_embeddings.to(args.device)
+            label_embeddings = torch.nn.functional.normalize(label_embeddings, p=2, dim=-1)
+
+            custom_model = CustomCLIPModel(base_model, len(test_dataset.get_label_map()), label_embeddings=label_embeddings, mode=args.mode, fusion_method=getattr(args, 'fusion_method', None), similarity=args.similarity)
+            custom_model = custom_model.to(args.device)
+            collate_fn = lambda x: clip_collate_fn(x, mode=args.mode)
+            custom_model.label_embeddings = label_embeddings
+            evaluate_model(custom_model, test_dataloader, train_dataset.get_label_map(), args, processor)
+            return
+
+        else:
+            label_embeddings = None
+        custom_model = CustomCLIPModel(base_model, len(train_dataset.get_label_map()), label_embeddings=label_embeddings, mode=args.mode, fusion_method=getattr(args, 'fusion_method', None), similarity=args.similarity)
         collate_fn = lambda x: clip_collate_fn(x, mode=args.mode)
 
     elif args.model_name == "vilt-b32-mlm":
@@ -114,7 +142,12 @@ def train_model(args):
     test_dataloader = DataLoader(test_dataset, batch_size=args.batch_size, shuffle=False, collate_fn=collate_fn)
 
     custom_model.to(args.device) 
-
+   
+    if args.similarity:
+        logger.info("Skipping training for similarity-based zero-shot evaluation.")
+        evaluate_model(custom_model, test_dataloader, train_dataset.get_label_map(), args, processor)
+        return
+    
     # Log to WandB if the project name is provided
     if args.wandb_project:
 
@@ -292,6 +325,11 @@ def evaluate_model(model, dataloader, label_mapping, args, processor):
                     input_ids = input_ids.to(args.device)
                     attention_mask = attention_mask.to(args.device)
                     logits = model(pixel_values=images, input_ids=input_ids, attention_mask=attention_mask)
+            
+                preds = torch.argmax(logits, dim=1)
+                predicted_labels.extend(preds.cpu().numpy())
+                true_labels.extend(labels)
+                ids_list.extend(ids)
 
             elif args.model_name == "vilt-b32-mlm":
                 ids, images, input_ids, attention_mask, labels = batch
@@ -299,13 +337,24 @@ def evaluate_model(model, dataloader, label_mapping, args, processor):
                 input_ids = input_ids.to(args.device)
                 attention_mask = attention_mask.to(args.device)
                 logits, _ = model(pixel_values=images, input_ids=input_ids, attention_mask=attention_mask)
-
+                
+                preds = torch.argmax(logits, dim=1)
+                true_labels.extend(labels)
+                predicted_labels.extend(preds.cpu().numpy())
+                ids_list.extend(ids)
+        
             elif args.model_name == "imagebind_huge":
                 ids, inputs, labels = batch
                 inputs = {k: v.to(args.device) for k, v in inputs.items()}
                 logits = model(inputs)
                 labels = labels.cpu().tolist()  # Convert to list of indices for ImageBind
-            
+                
+                preds = torch.argmax(logits, dim=1)
+                if isinstance(labels, torch.Tensor): 
+                    true_labels.extend(labels.cpu().tolist())
+                predicted_labels.extend(preds.cpu().numpy())
+                ids_list.extend(ids)
+
             elif args.model_name == "microsoft/Florence-2-large":
                 ids, inputs, labels = batch
                 inputs = {k: v.to(args.device) for k, v in inputs.items()}
@@ -355,15 +404,15 @@ def evaluate_model(model, dataloader, label_mapping, args, processor):
                     logger.info(f"Processed {len(ids_list)} samples ... ")
                     time.sleep(2)  # To avoid hitting API rate limits
 
-            if args.model_name not in ["microsoft/Florence-2-large", "gpt-4o"]:
-                preds = torch.argmax(logits, dim=1)
-                if isinstance(labels, torch.Tensor):  # Handle labels for ImageBind
-                    true_labels.extend(labels.cpu().tolist())
-                else:  # Handle labels for CLIP and ViLT
-                    true_labels.extend(labels)
+            # if args.model_name not in ["microsoft/Florence-2-large", "gpt-4o"]:
+            #     preds = torch.argmax(logits, dim=1)
+            #     if isinstance(labels, torch.Tensor):  # Handle labels for ImageBind
+            #         true_labels.extend(labels.cpu().tolist())
+            #     else:  # Handle labels for CLIP and ViLT
+            # #         true_labels.extend(labels)
 
-                predicted_labels.extend(preds.cpu().numpy())
-                ids_list.extend(ids)
+            #     predicted_labels.extend(preds.cpu().numpy())
+            #     ids_list.extend(ids)
             # break
     # Convert indices to labels using the inverse label map
     if args.model_name not in ["microsoft/Florence-2-large", "gpt-4o"]:

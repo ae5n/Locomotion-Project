@@ -2,6 +2,8 @@ import torch
 import torch.nn as nn
 import json
 import Levenshtein
+import torch.nn.functional as F
+
 
 class CustomFusionModule(nn.Module):
     def __init__(self, method, embedding_dim1, embedding_dim2=None):
@@ -33,11 +35,14 @@ class CustomFusionModule(nn.Module):
             raise ValueError(f"Unknown fusion method: {self.method}")
 
 class CustomCLIPModel(nn.Module):
-    def __init__(self, clip_model, num_classes, mode='image_text', fusion_method='average'):
+    def __init__(self, clip_model, num_classes, label_embeddings, mode='image_text', fusion_method='average', similarity=False):
         super(CustomCLIPModel, self).__init__()
         self.clip_model = clip_model
         self.mode = mode
         self.fusion_method = fusion_method
+        self.similarity = similarity
+        self.label_embeddings = label_embeddings
+        self.label_projection = nn.Linear(768, 1024)
         self.fc_image = nn.Linear(self.clip_model.vision_model.config.hidden_size, num_classes) if mode in ['image_only', 'image_text'] else None
         self.fc_text = nn.Linear(self.clip_model.text_model.config.hidden_size, num_classes) if mode in ['text_only', 'image_text'] else None
         self.fusion = CustomFusionModule(fusion_method, self.clip_model.vision_model.config.hidden_size, self.clip_model.text_model.config.hidden_size)
@@ -48,18 +53,50 @@ class CustomCLIPModel(nn.Module):
         if self.mode in ['image_only', 'image_text']:
             vision_outputs = self.clip_model.vision_model(pixel_values=pixel_values)
             image_embeds = vision_outputs.pooler_output
-            logits_image = self.fc_image(image_embeds)
+            # logits_image = self.fc_image(image_embeds) 
+            print(f'Image embeddings shape: {image_embeds.shape}')
 
         if self.mode in ['text_only', 'image_text']:
             text_outputs = self.clip_model.text_model(input_ids=input_ids, attention_mask=attention_mask)
             text_embeds = text_outputs.pooler_output
+            # logits_text = self.fc_text(text_embeds)
+            print(f'Text embeddings shape: {text_embeds.shape}')
+        
+        # In similarity mode, return embeddings for similarity computation
+        if self.similarity:
+            print("Similarity mode is activated.")
+            if self.mode == 'image_only':
+                return self.compute_similarity(image_embeds, self.label_embeddings)  # return similarity score
+            elif self.mode == 'text_only':
+                return self.compute_similarity(self.label_projection(text_embeds), self.label_embeddings)  # return similarity score
+            elif self.mode == 'image_text':
+                # Compute similarity for both and sum the scores
+                image_similarity = self.compute_similarity(image_embeds, self.label_embeddings)
+                text_similarity = self.compute_similarity(self.label_projection(text_embeds), self.label_embeddings)
+                combined_similarity = (image_similarity + text_similarity) / 2  # Combine scores
+                return combined_similarity
+
+        # For classification (non-similarity mode), return logits
+        if self.mode == 'image_only':
+            logits_image = self.fc_image(image_embeds)
+            return logits_image  # return logits for classification
+
+        if self.mode == 'text_only':
             logits_text = self.fc_text(text_embeds)
+            return logits_text  # return logits for classification
 
         if self.mode == 'image_text':
             fused_output = self.fusion(image_embeds, text_embeds)
-            return fused_output
+            return fused_output  # fused embeddings for classification
 
-        return logits_image if logits_image is not None else logits_text
+    def compute_similarity(self, embeddings, label_embeddings):
+        # Project label embeddings to 1024 dimensions to match the image embeddings
+        projected_label_embeddings = self.label_projection(label_embeddings)
+        # Normalize embeddings
+        embeddings = F.normalize(embeddings, p=2, dim=-1)
+        # Compute cosine similarity
+        similarity_scores = torch.matmul(embeddings, projected_label_embeddings.T)
+        return similarity_scores
 
 
 class CustomViLTModel(nn.Module):
@@ -160,26 +197,6 @@ class CustomGPT4oModel(nn.Module):
                     "Combine information from both the frames and the command to predict the locomotion activity the user is performing."
                 )
 
-    # def get_best_label_levenshtein(self, predicted_label):
-    #     """ Use Levenshtein similarity to find the closest valid label. """
-    #     best_label = max(self.valid_labels, key=lambda label: Levenshtein.ratio(predicted_label, label))
-    #     return best_label
-    
-    # def levenshtein_similarity(self, reasoning_path):
-    #     """
-    #     Use Levenshtein similarity to match the predicted label based on the reasoning path.
-    #     """
-    #     best_label = None
-    #     highest_similarity = float('-inf')
-
-    #     for label in self.valid_labels:
-    #         similarity = Levenshtein.ratio(reasoning_path.lower(), label.lower())
-    #         if similarity > highest_similarity:
-    #             highest_similarity = similarity
-    #             best_label = label
-
-    #     return best_label
-
     def predict(self, text, encoded_image=None, temperature=0.7, top_p=0.9, frequency_penalty=0.0, presence_penalty=0.0, max_tokens=50, model_name=None):
         if model_name is not None:
             self.model_name = model_name
@@ -230,18 +247,6 @@ class CustomGPT4oModel(nn.Module):
                 {"role": "user", "content": prompt}
             ]
 
-        # response = self.client.chat.completions.create(
-        #     model=self.model_name,
-        #     messages=message,
-        #     functions=[function],
-        #     function_call={"name": "predict_locomotion_activity"},
-        #     max_tokens=max_tokens,
-        #     temperature=temperature,
-        #     top_p=top_p,
-        #     frequency_penalty=frequency_penalty,
-        #     presence_penalty=presence_penalty
-        # )
-
         response = self.client.chat.completions.create(
         model=self.model_name,
         messages=message,
@@ -253,26 +258,16 @@ class CustomGPT4oModel(nn.Module):
         )
 
         print('GPT Full Response:', response)
-
-        # response_content = response.choices[0].message.content
         
         reasoning_path = response.choices[0].message.content
         
         predicted_label = reasoning_path.split("Prediction: ")[1].strip().rstrip('.')
 
-        # predicted_label = self.get_best_label_levenshtein(predicted_label)
-        
-        
-        # Use Levenshtein similarity to match the label
-        # predicted_label = self.levenshtein_similarity(reasoning_path)
-        # Apply the kneeling rule to correct the predicted label
+        # Apply the kneeling rule to correct the predicted label based on the generated reasoning path
         if "kneeling" in reasoning_path.lower() or "kneel" in reasoning_path.lower():
             predicted_label = "Sitting"
 
-        # Print the reasoning path and the final predicted label
         print('\nreasoning path:', reasoning_path)
         print('predicted:', predicted_label)
-        # function_call_arguments = json.loads(response.choices[0].message.function_call.arguments)
-        # predicted_label = function_call_arguments["prediction"]
         return predicted_label, reasoning_path
 

@@ -1,0 +1,8 @@
+model_name: "clip-vit-large-patch14-336"
+batch_size: 1 
+fusion_method: #Use similarity for zero-shot
+learning_rate: 
+mode: image_text
+num_epochs: 
+patience: 
+similarity: true
