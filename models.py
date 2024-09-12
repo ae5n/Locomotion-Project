@@ -53,18 +53,13 @@ class CustomCLIPModel(nn.Module):
         if self.mode in ['image_only', 'image_text']:
             vision_outputs = self.clip_model.vision_model(pixel_values=pixel_values)
             image_embeds = vision_outputs.pooler_output
-            # logits_image = self.fc_image(image_embeds) 
-            print(f'Image embeddings shape: {image_embeds.shape}')
 
         if self.mode in ['text_only', 'image_text']:
             text_outputs = self.clip_model.text_model(input_ids=input_ids, attention_mask=attention_mask)
             text_embeds = text_outputs.pooler_output
-            # logits_text = self.fc_text(text_embeds)
-            print(f'Text embeddings shape: {text_embeds.shape}')
         
         # In similarity mode, return embeddings for similarity computation
         if self.similarity:
-            print("Similarity mode is activated.")
             if self.mode == 'image_only':
                 return self.compute_similarity(image_embeds, self.label_embeddings)  # return similarity score
             elif self.mode == 'text_only':

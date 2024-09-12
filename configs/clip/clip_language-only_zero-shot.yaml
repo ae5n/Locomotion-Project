@@ -1,8 +1,8 @@
 model_name: "clip-vit-large-patch14-336"
-batch_size: 1 #test
+batch_size: 1
 fusion_method:
 learning_rate: 
-mode: language_only
+mode: text_only
 num_epochs: 
 patience: 
 similarity: true
