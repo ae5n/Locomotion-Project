@@ -358,7 +358,7 @@ def evaluate_model(model, dataloader, label_mapping, args, processor):
             elif args.model_name == "microsoft/Florence-2-large":
                 ids, inputs, labels = batch
                 inputs = {k: v.to(args.device) for k, v in inputs.items()}
-                generated_ids = model.generate(input_ids=inputs['input_ids'], pixel_values=inputs['pixel_values'], max_new_tokens=50)
+                generated_ids = model.generate(input_ids=inputs['input_ids'], pixel_values=inputs['pixel_values'], max_new_tokens=args.max_new_token)
                 generated_text = processor.batch_decode(generated_ids, skip_special_tokens=True)
                 true_text = processor.batch_decode(labels, skip_special_tokens=True)
             
