@@ -153,20 +153,20 @@ class CustomGPT4oModel(nn.Module):
                 return (
                     "You are provided with an image containing field-of-view (FOV) frames from smart glasses worn by a user performing a locomotion activity "
                     "in an industrial environment. The 9 frames in the image are sampled in chronological order over a 5-second period, with 2 seconds before and 3 seconds after the command was given, "
-                    "providing context for the user's activity. "
                     "Based on the frames, identify the locomotion activity the user is performing."
                 )
             elif self.mode == 'text_only':
                 return (
                     f"The user is performing a locomotion activity in an industrial environment and has issued the following command: \"{text}\". "
                     "Based on the command, identify the locomotion activity the user is performing."
+                    "If the activity is unclear from the given command, provide the most plausible guess from the valid locomotion activities."
+
                 )
             elif self.mode == 'image_text':
                 return (
                     "You are provided with an image containing field-of-view (FOV) frames from smart glasses worn by a user performing a locomotion activity "
                     "in an industrial environment, along with a spoken command issued by the user. "
                     "The 9 frames in the image are sampled in chronological order over a 5-second period, with 2 seconds before and 3 seconds after the command was given, "
-                    "providing context for the user's activity. "
                     f"The command is: \"{text}\". "
                     "Based on the frames and the command, identify the locomotion activity the user is performing."
                 )
@@ -181,6 +181,8 @@ class CustomGPT4oModel(nn.Module):
                 return (
                     f"The user is performing a locomotion activity in an industrial environment and has issued the following command: \"{text}\". "
                     "Think step by step: break down the meaning of the command, understand the user's intention, and determine the locomotion activity the user is performing."
+                    "If the activity is unclear from the given command, provide the most plausible guess from the valid locomotion activities."
+
                 )
             elif self.mode == 'image_text':
                 return (
